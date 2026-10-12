@@ -1130,11 +1130,12 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     return () => clearShowScrollTimeout()
   }, [clearShowScrollTimeout])
 
-  useEffect(() => {
-    isAtEndRef.current = true
-    clearShowScrollTimeout()
-    setShowScrollToBottom(false)
-  }, [clearShowScrollTimeout, state.activeChatId])
+  // Nothing here resets the scroll-to-bottom button on a chat switch. The
+  // transcript says where the new chat stands as it mounts, before it is
+  // painted (`onIsAtEndChange`): at the end while it has no rows, then
+  // wherever it positions them. A reset from an effect here ran after that
+  // and undid it: between two chats both read part-way, the button went out
+  // and came back.
 
   useEffect(() => {
     function handleGlobalKeydown(event: KeyboardEvent) {

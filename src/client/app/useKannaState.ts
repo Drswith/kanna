@@ -49,12 +49,15 @@ import {
 } from "./snapshotEquality"
 import {
   cachedWindowToMessages,
+  canPaintCachedWindow,
   createTranscriptCacheWriter,
+  peekPaintableMemoryWindow,
   readCachedWindow,
   readMemoryCachedWindow,
+  trimCachedWindow,
   type CachedTranscriptWindow,
 } from "./chatTranscriptCache"
-import { DEFAULT_TRANSCRIPT_WINDOW_ASSISTANT_MESSAGES, trimTranscriptWindow } from "../../shared/transcript-window"
+import { DEFAULT_TRANSCRIPT_WINDOW_ASSISTANT_MESSAGES } from "../../shared/transcript-window"
 import { CLOUD_WS_ENDPOINT_PATH, type CloudWsEndpointResponse } from "../../shared/cloud-api"
 import { KannaSocket, type SocketStatus } from "./socket"
 import { SIDEBAR_COLLAPSED_STORAGE_KEY } from "../lib/storageKeys"
@@ -423,6 +426,18 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const transcriptWindowSizeRef = useRef(DEFAULT_TRANSCRIPT_WINDOW_ASSISTANT_MESSAGES)
   transcriptWindowSizeRef.current = appSettings?.transcript?.windowAssistantMessages ?? DEFAULT_TRANSCRIPT_WINDOW_ASSISTANT_MESSAGES
 
+  // A chat held in memory is drawn in the render that switches to it. The
+  // subscription effect below reads the same window, but it runs after that
+  // render has been committed and painted, so the switch used to show an
+  // empty transcript for a frame, and the transcript's rows arrived in a
+  // later commit than the one that mounted it. Set while rendering so the
+  // chat's first frame is its rows, at the place its reader left it.
+  const [seededChatId, setSeededChatId] = useState<string | null>(null)
+  if (seededChatId !== activeChatId) {
+    setSeededChatId(activeChatId)
+    setCachedTranscript(activeChatId ? peekPaintableMemoryWindow(activeChatId, transcriptWindowSizeRef.current) : null)
+  }
+
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false)
   /**
    * Widen the open chat's window toward the start. The older slice arrives
@@ -507,17 +522,19 @@ export function useKannaState(activeChatId: string | null): KannaState {
       // to the window a fresh open would get before painting from it, so a
       // cached chat is not the one case that still mounts every row. The span
       // sent to the server is the trimmed one, so it resumes from there.
-      const trimmed = cached
-        ? trimTranscriptWindow(cachedWindowToMessages(cached), transcriptWindowSizeRef.current)
-        : null
-      const lastEntryId = trimmed?.messages[trimmed.messages.length - 1]?._id
+      const trimmed = cached ? trimCachedWindow(cached, transcriptWindowSizeRef.current) : null
+      const lastEntryId = trimmed?.entries[trimmed.entries.length - 1]?._id
       const span = trimmed && lastEntryId
-        ? { start: trimmed.startIndex, end: trimmed.startIndex + trimmed.messages.length, endEntryId: lastEntryId }
+        ? { start: trimmed.startIndex, end: trimmed.startIndex + trimmed.entries.length, endEntryId: lastEntryId }
         : null
       if (trimmed && span) {
-        base = trimmed
-        setCachedTranscript({ ...cached!, entries: trimmed.messages, startIndex: trimmed.startIndex })
-        recordClientPerformance("chat_cache_ready_ms", performance.now() - openedAt)
+        base = cachedWindowToMessages(trimmed)
+        // Drawn now only if it can be drawn in place (`canPaintCachedWindow`).
+        // It seeds the subscription either way.
+        if (canPaintCachedWindow(trimmed)) {
+          setCachedTranscript(trimmed)
+          recordClientPerformance("chat_cache_ready_ms", performance.now() - openedAt)
+        }
       }
       // The server sizes the window (the transcript-window setting, widened
       // to reach the stored read anchor) and returns the anchor inline.
@@ -568,8 +585,9 @@ export function useKannaState(activeChatId: string | null): KannaState {
           return
         }
         if (receivedSnapshot || !cached) return
-        const trimmed = trimTranscriptWindow(cachedWindowToMessages(cached), transcriptWindowSizeRef.current)
-        setCachedTranscript({ ...cached, entries: trimmed.messages, startIndex: trimmed.startIndex })
+        const trimmed = trimCachedWindow(cached, transcriptWindowSizeRef.current)
+        if (!canPaintCachedWindow(trimmed)) return
+        setCachedTranscript(trimmed)
         recordClientPerformance("chat_cache_ready_ms", performance.now() - openedAt)
       })
     }
@@ -1226,7 +1244,13 @@ export function useKannaState(activeChatId: string | null): KannaState {
     chatSnapshot,
     readAnchorState,
     reportReadAnchor,
-    hasOlderMessages: (activeChatSnapshot?.startIndex ?? 0) > 0,
+    // From the cached window until the snapshot says. Load More is part of
+    // the transcript's height, and a button that came in with the snapshot
+    // pushed a transcript already on screen down by its height.
+    hasOlderMessages: (
+      activeChatSnapshot?.startIndex
+      ?? (cachedTranscript?.chatId === activeChatId ? cachedTranscript.startIndex : 0)
+    ) > 0,
     transcriptOutline: activeChatSnapshot?.outline ?? EMPTY_OUTLINE,
     loadOlderMessages,
     isLoadingOlderMessages,
