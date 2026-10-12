@@ -2,7 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, type ReactNode, type Ref
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type Modifier } from "@dnd-kit/core"
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
 import { CSS as DndCSS } from "@dnd-kit/utilities"
-import { PencilLine, Workflow, X } from "lucide-react"
+import { PencilLine, X } from "lucide-react"
+import { DelegatorIcon } from "./delegator-icon"
 import { getAdjacentChatTab, getChatTabAfterClose, type ChatTab } from "../../lib/chat-tabs"
 import { isMacApp } from "../../lib/macApp"
 import { flattenSidebarThreads, type SidebarThread } from "../../lib/thread-sections"
@@ -74,7 +75,7 @@ const Tab = memo(function Tab({ tab, thread, active, isNew, editorLabel, actions
         ? <PencilLine className="h-4 w-4 shrink-0 text-logo" />
         // A delegator's own mark, as on its sidebar row, where the navbar's
         // "Delegator" tag is when tabs are off.
-        : thread?.row.delegator ? <Workflow className="h-4 w-4 shrink-0 text-muted-foreground" />
+        : thread?.row.delegator ? <DelegatorIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
         : thread ? <ProjectIcon name={thread.projectTitle} iconUrl={thread.projectIconUrl} /> : null)}
     </span>
   )

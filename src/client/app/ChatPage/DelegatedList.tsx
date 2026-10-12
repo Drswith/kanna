@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
-import { Network, Workflow } from "lucide-react"
+import { Network } from "lucide-react"
+import { DelegatorIcon } from "../../components/chat-ui/delegator-icon"
 import { useChatReferenceActions, useSidebarThread } from "../../components/chat-ui/chat-reference"
 import { SidebarChatHoverCard } from "../../components/chat-ui/sidebar/ChatHoverCard"
 import { ThreadSections } from "../../components/chat-ui/sidebar/ThreadSections"
@@ -73,7 +74,7 @@ export const DelegatedList = memo(function DelegatedList({ item, onClose }: {
   return (
     <ViewerSurface
       label={delegator ? `Chats under ${delegator.title}` : "Delegated chats"}
-      icon={<Workflow />}
+      icon={<DelegatorIcon />}
       title="Delegated"
       subtitle={delegator?.title}
       toolbar={(

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
-import { Archive, Code, Copy, EyeOff, FolderOpen, Github, Pencil, PencilOff, Pin, PinOff, RotateCcw, Split, SquarePen, Trash2, UserRoundPlus, Workflow } from "lucide-react"
+import { Archive, Code, Copy, EyeOff, FolderOpen, Github, Pencil, PencilOff, Pin, PinOff, RotateCcw, Split, SquarePen, Trash2, UserRoundPlus } from "lucide-react"
+import { DelegatorIcon } from "../delegator-icon"
 import { getRepoUrlLabel } from "../../../../shared/git-url"
 import {
   ContextMenu,
@@ -233,7 +234,7 @@ export function ChatRowMenu({
             // The chat's agent is told at the start of a turn, so one that is
             // running goes on as it was until its next.
             <ContextMenuItem onSelect={onToggleDelegator} title="Takes effect on this chat's next turn">
-              <Workflow className="h-3.5 w-3.5" />
+              <DelegatorIcon className="h-3.5 w-3.5" />
               <span className="text-xs font-medium">{delegator ? "Stop Delegating" : "Make Delegator"}</span>
             </ContextMenuItem>
           ) : null}

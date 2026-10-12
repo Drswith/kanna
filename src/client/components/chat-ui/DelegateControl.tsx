@@ -1,10 +1,11 @@
-import { Check, Plus, SquarePen, Workflow } from "lucide-react"
+import { Check, Plus, SquarePen } from "lucide-react"
 import type { ReactNode } from "react"
 import type { AgentProvider } from "../../../shared/types"
 import { delegatedAttentionCount, delegatorDisplayTitle } from "../../lib/delegators"
 import type { SidebarThread } from "../../lib/thread-sections"
 import { useSidebarStore } from "../../stores/sidebarStore"
 import { InputPopover, PopoverMenuItem } from "./ChatPreferenceControls"
+import { DelegatorIcon } from "./delegator-icon"
 
 /**
  * What the new chat page's composer is told when the project can delegate:
@@ -44,7 +45,7 @@ export function DelegateControl({ delegators, target, projectName, onPick, onCre
     <InputPopover
       trigger={(
         <>
-          <Workflow className="h-3.5 w-3.5" />
+          <DelegatorIcon className="h-3.5 w-3.5" />
           <span className="max-w-[16ch] truncate">{target ? delegatorDisplayTitle(target.title) : "Delegate"}</span>
         </>
       )}
@@ -113,7 +114,7 @@ function DelegatorMenuItem({ delegator, selected, onPick }: {
     <PopoverMenuItem
       onClick={onPick}
       selected={false}
-      icon={<Workflow className="h-4 w-4 text-muted-foreground" />}
+      icon={<DelegatorIcon className="h-4 w-4 text-muted-foreground" />}
       label={delegatorDisplayTitle(delegator.title)}
       description={summary}
       trailing={selected ? <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : undefined}

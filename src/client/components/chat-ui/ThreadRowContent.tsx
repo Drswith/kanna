@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
-import { Loader2, MessageCircle, PencilLine, Workflow } from "lucide-react"
+import { Loader2, MessageCircle, PencilLine } from "lucide-react"
+import { DelegatorIcon } from "./delegator-icon"
 import type { SidebarChatRow } from "../../../shared/types"
 import type { SidebarThread } from "../../lib/thread-sections"
 import { cn } from "../../lib/utils"
@@ -161,7 +162,7 @@ export function ThreadRowContent({
   const HarnessIcon = showsDraft
     ? PencilLine
     : isDelegator
-      ? Workflow
+      ? DelegatorIcon
       : thread.row.provider ? PROVIDER_ICONS[thread.row.provider] : null
   // The chat has work sitting in its project's dirty tree, so keep its title at
   // full contrast. Deliberately *not* a colour treatment on the harness icon —
@@ -226,14 +227,14 @@ export function ThreadRowContent({
             {/* `truncate` has to sit on a block, not on the flex parent —
                 text-overflow doesn't apply to a flex container, so putting it
                 up there clips a long `repo/branch` with no ellipsis. */}
-            {delegatorMarkTrails ? <Workflow aria-label="Delegator" className="mr-1 size-3 shrink-0" /> : null}
+            {delegatorMarkTrails ? <DelegatorIcon aria-label="Delegator" className="mr-1 size-3 shrink-0" /> : null}
             <span className="min-w-0 truncate">{detailLabel ?? ""}</span>
           </span>
         </span>
       ) : (
         // See above: natural width, capped at half the row.
         <span className="ml-auto flex max-w-[50%] shrink-0 items-center gap-1.5 pl-3 text-xs">
-          {delegatorMarkTrails ? <Workflow aria-label="Delegator" className="size-3 shrink-0 text-muted-foreground" /> : null}
+          {delegatorMarkTrails ? <DelegatorIcon aria-label="Delegator" className="size-3 shrink-0 text-muted-foreground" /> : null}
           {detailLabel == null ? null : (
             <span className="min-w-0 truncate text-muted-foreground">{detailLabel}</span>
           )}

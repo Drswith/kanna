@@ -1,10 +1,10 @@
-import { Workflow } from "lucide-react"
 import { delegatedAttentionCount } from "../../lib/delegators"
 import { cn } from "../../lib/utils"
 import { useRightSidebarStore } from "../../stores/rightSidebarStore"
 import { useSidebarStore } from "../../stores/sidebarStore"
 import { openViewer, useViewerStore } from "../../stores/viewerStore"
 import { Button } from "../ui/button"
+import { DelegatorIcon } from "./delegator-icon"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 
 /** The delegated list's toggle, read once: for the command palette, which shows the same state. */
@@ -63,7 +63,7 @@ export function DelegatedListButton({ chatId, overlay }: { chatId: string; overl
             overlay ? "text-logo hover:text-logo" : pressed && "text-foreground",
           )}
         >
-          <Workflow strokeWidth={2} className="h-4 shrink-0 max-md:h-5 max-md:w-5" />
+          <DelegatorIcon strokeWidth={2} className="h-4 shrink-0 max-md:h-5 max-md:w-5" />
           {count > 0 ? (
             <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-[5px] bg-foreground/10 px-1 text-xs font-bold leading-none text-foreground tabular-nums">
               {count}

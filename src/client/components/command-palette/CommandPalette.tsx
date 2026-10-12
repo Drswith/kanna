@@ -25,7 +25,6 @@ import {
   LockOpen,
   Moon,
   Network,
-  Workflow,
   PanelRight,
   Paperclip,
   Plus,
@@ -71,6 +70,7 @@ import { useTerminalLayoutStore } from "../../stores/terminalLayoutStore"
 import { useTerminalPreferencesStore } from "../../stores/terminalPreferencesStore"
 import { useChatViewer, useViewerStore } from "../../stores/viewerStore"
 import { toggleDelegatedPane } from "../chat-ui/DelegatedListButton"
+import { DelegatorIcon } from "../chat-ui/delegator-icon"
 import { PROVIDER_ICONS } from "../chat-ui/ChatPreferenceControls"
 import { UsageSection } from "../../app/settings/UsageSection"
 import { getOpenAppItems, openAppValue, OpenAppIcon, useInstalledEditors, useInstalledTerminals } from "../open-external-menu"
@@ -754,7 +754,7 @@ export function CommandPalette({ state }: { state: KannaState }) {
         id: "toggle-delegated",
         title: viewerShown ? "Hide Delegated" : "Show Delegated",
         keywords: ["delegated", "delegator", "delegate", "sub-chats", "subchats", "sub chats", "chats", "list", "pane", "show", "hide", "toggle"],
-        icon: <Workflow className={ICON_CLASS} />,
+        icon: <DelegatorIcon className={ICON_CLASS} />,
         run: () => {
           close()
           toggleDelegatedPane(delegatorChatId)
