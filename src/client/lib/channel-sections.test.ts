@@ -130,9 +130,13 @@ describe("computeChannelSections", () => {
 })
 
 describe("getChannelPeekGroups", () => {
-  function peek(chats: SidebarChatRow[]) {
-    return getChannelPeekGroups(project("p", chats), NOW)
-      .map((group) => [group.label, group.threads.map((thread) => thread.chatId)])
+  function peek(chats: SidebarChatRow[], archivedIds: string[] = []) {
+    const group = {
+      ...project("p", chats.filter((row) => !archivedIds.includes(row.chatId))),
+      archivedChats: chats.filter((row) => archivedIds.includes(row.chatId)),
+    }
+    return getChannelPeekGroups(group, NOW)
+      .map((peekGroup) => [peekGroup.label, peekGroup.threads.map((thread) => thread.chatId)])
   }
 
   test("offers everything down to Relevant, then the latest date bucket only", () => {
@@ -143,11 +147,38 @@ describe("getChannelPeekGroups", () => {
       chat("today", NOW),
       chat("yesterday", NOW - DAY),
     ])).toEqual([
+      // The Chats view's own order.
+      ["Pinned", ["pinned"]],
       ["In Progress", ["running"]],
       ["Relevant", ["unread"]],
-      ["Pinned", ["pinned"]],
       ["Today", ["today"]],
     ])
+  })
+
+  test("leads with the project's delegators, which are in no other group", () => {
+    expect(peek([
+      chat("pinned", NOW - 9 * DAY, { pinnedAt: 1 }),
+      chat("running", NOW, { status: "running" }),
+      chat("today", NOW),
+      // Each would be in a group below, were it not a delegator.
+      chat("delegator-idle-old", NOW - 9 * DAY, { delegator: true }),
+      chat("delegator-running", NOW - DAY, { delegator: true, status: "running" }),
+      chat("delegator-unread", NOW - 2 * DAY, { delegator: true, unread: true }),
+      chat("delegator-pinned-second", NOW - 5 * DAY, { delegator: true, pinnedAt: 7 }),
+      chat("delegator-pinned-first", NOW - 30 * DAY, { delegator: true, pinnedAt: 3 }),
+      chat("delegator-archived", NOW, { delegator: true }),
+    ], ["delegator-archived"])).toEqual([
+      // Pinned ones in the order they were pinned, then the rest newest first.
+      ["Delegators", ["delegator-pinned-first", "delegator-pinned-second", "delegator-running", "delegator-unread", "delegator-idle-old"]],
+      ["Pinned", ["pinned"]],
+      ["In Progress", ["running"]],
+      ["Today", ["today"]],
+    ])
+  })
+
+  test("delegators are all there before the card is asked for more, and a project of only delegators has one group", () => {
+    expect(peek([chat("d1", NOW - 40 * DAY, { delegator: true }), chat("d2", NOW - 50 * DAY, { delegator: true })]))
+      .toEqual([["Delegators", ["d1", "d2"]]])
   })
 
   test("is the latest day alone for a project with nothing pressing", () => {
