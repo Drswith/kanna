@@ -1571,6 +1571,56 @@ describe("AgentCoordinator claude integration", () => {
     events.close()
   })
 
+  test("a chat made a delegator restarts its Claude session, which resumes with the delegator instructions", async () => {
+    const startSessionCalls: Array<{ delegator?: boolean; sessionToken: string | null }> = []
+    const store = createFakeStore()
+    const coordinator = new AgentCoordinator({
+      store: store as never,
+      onStateChange: () => {},
+      startClaudeSession: async (args) => {
+        startSessionCalls.push({ delegator: args.delegator, sessionToken: args.sessionToken })
+        const events = new AsyncEventQueue<any>()
+        return {
+          provider: "claude",
+          stream: events,
+          getAccountInfo: async () => null,
+          interrupt: async () => {},
+          close: () => events.close(),
+          setModel: async () => {},
+          setPermissionMode: async () => {},
+          sendPrompt: async () => {
+            events.push({ type: "session_token" as const, sessionToken: "claude-session-1" })
+            events.push({
+              type: "transcript" as const,
+              entry: timestamped({ kind: "result", subtype: "success", isError: false, durationMs: 0, result: "done" }),
+            })
+          },
+        }
+      },
+    })
+    const send = (content: string) => coordinator.send({ type: "chat.send", chatId: "chat-1", provider: "claude", content, model: "claude-opus-4-1" })
+
+    await send("one")
+    await waitFor(() => store.turnFinishedCount === 1)
+    await send("two")
+    await waitFor(() => store.turnFinishedCount === 2)
+    // The system prompt is fixed when the session starts, so the flag is part
+    // of what a session is reused for.
+    ;(store.chat as { delegator?: true }).delegator = true
+    await send("three")
+    await waitFor(() => store.turnFinishedCount === 3)
+    delete (store.chat as { delegator?: true }).delegator
+    await send("four")
+    await waitFor(() => store.turnFinishedCount === 4)
+
+    expect(startSessionCalls).toEqual([
+      { delegator: false, sessionToken: null },
+      { delegator: true, sessionToken: "claude-session-1" },
+      { delegator: false, sessionToken: "claude-session-1" },
+    ])
+    coordinator.dispose()
+  })
+
   test("a Claude turn the CLI started on its own does not end the user's turn", async () => {
     const events = new AsyncEventQueue<any>()
     const promptIds: string[] = []

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { KANNA_CHAT_LINK_INSTRUCTIONS } from "../shared/chat-links"
 import { buildKannaAgentTrailer } from "./attribution"
-import { buildKannaSystemInstructions, buildKannaSystemMessage, KANNA_ORCHESTRATION_INSTRUCTIONS, KANNA_VISUALIZATION_INSTRUCTIONS } from "./harness-instructions"
+import { buildKannaSystemInstructions, buildKannaSystemMessage, KANNA_DELEGATOR_INSTRUCTIONS, KANNA_ORCHESTRATION_INSTRUCTIONS, KANNA_VISUALIZATION_INSTRUCTIONS } from "./harness-instructions"
 import { KANNA_TOOL_DESCRIPTION_LIMIT, KANNA_TOOL_NAMES, kannaToolSpecs } from "./kanna-tools"
 import { SHOW_VISUALIZATION_TOOL } from "./kanna-visualization-tool"
 import { KANNA_VISUALIZATION_CONTRACT, KANNA_VISUALIZATION_SKILL_INSTRUCTIONS } from "./visualization-instructions"
@@ -20,6 +20,35 @@ describe("buildKannaSystemInstructions", () => {
     expect(buildKannaSystemInstructions(AGENT_ID)).toContain(KANNA_ORCHESTRATION_INSTRUCTIONS)
     expect(buildKannaSystemInstructions(AGENT_ID, { tools: false })).not.toContain("create_chat")
     expect(buildKannaSystemMessage(AGENT_ID, { tools: false })).not.toContain("create_chat")
+  })
+
+  test("tells a delegator to hand work on, and no other chat", () => {
+    for (const build of [buildKannaSystemInstructions, buildKannaSystemMessage]) {
+      expect(build(AGENT_ID, { delegator: true })).toContain(KANNA_DELEGATOR_INSTRUCTIONS)
+      expect(build(AGENT_ID)).not.toContain("delegator")
+      expect(build(AGENT_ID, { delegator: false })).not.toContain("delegator")
+      // It hands work on with the chat tools, so a harness without them is not told to.
+      expect(build(AGENT_ID, { delegator: true, tools: false })).not.toContain("delegator")
+    }
+    // Once, after the tools it is written in terms of.
+    const told = buildKannaSystemInstructions(AGENT_ID, { delegator: true })
+    expect(told.split(KANNA_DELEGATOR_INSTRUCTIONS)).toHaveLength(2)
+    expect(told.indexOf(KANNA_DELEGATOR_INSTRUCTIONS)).toBeGreaterThan(told.indexOf(KANNA_ORCHESTRATION_INSTRUCTIONS))
+    expect(buildKannaSystemInstructions(AGENT_ID, { delegator: true }).length - buildKannaSystemInstructions(AGENT_ID).length)
+      .toBe(KANNA_DELEGATOR_INSTRUCTIONS.length + 2)
+  })
+
+  test("what a delegator is told covers the five things, with tools that exist", () => {
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("almost always hand it to another chat")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("If one already covers that area")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("has this chat as its parent")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("`adopt: true` on `send_message`")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Several unrelated tasks in one message go to several chats.")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Do not redo")
+    const named = [...KANNA_DELEGATOR_INSTRUCTIONS.matchAll(/`([a-z_]+)`/g)].map((match) => match[1]!)
+    for (const name of named) expect(KANNA_TOOL_NAMES as readonly string[]).toContain(name)
+    // Every delegator turn pays for it.
+    expect(KANNA_DELEGATOR_INSTRUCTIONS.length).toBeLessThan(1_200)
   })
 
   test("names only tools that exist", () => {
@@ -95,6 +124,14 @@ test("the tool is reached for by situation, for a diagram and a prototype as muc
   for (const rule of ["inline SVG", "no library", "320px", "arrowheads", "--border", `${VISUALIZATION_MAX_HEIGHT}px`, "visible at rest"]) expect(diagrams).toContain(rule)
   // And a prototype says when to step through directions and when to lay them side by side.
   expect(prototypes).toContain("kanna-segmented picker")
+  // The version picker is centred, and the example a model copies does it.
+  expect(prototypes).toContain("centred in that row and not pushed to one side")
+  expect(prototypes).toContain('<div class="kanna-picker"><div class="kanna-segmented" role="radiogroup"')
+  expect(prototypes).toContain("(kanna-tabs) go in the same wrapper, centred too")
+  expect(description).toContain("version picker is centred")
+  // A chart's settings are not: they sit under a left-aligned header.
+  expect(charts).not.toContain("kanna-picker")
+  expect(every).not.toContain("kanna-picker")
   expect(prototypes).toContain("side by side")
   expect(prototypes).toContain("wait for that choice")
   expect(prototypes).toContain('<section id="stage" style="height:40px">')

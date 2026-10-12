@@ -279,6 +279,7 @@ function getReplayEventPriority(event: StoreEvent) {
     case "chat_last_message_at_set":
     case "chat_report_owed_set":
     case "chat_parent_set":
+    case "chat_delegator_set":
       return 9
     case "chat_pin_set":
     case "chat_deleted":
@@ -772,8 +773,17 @@ export class EventStore {
           ...(event.parentChatId ? { parentChatId: event.parentChatId } : {}),
           ...(event.forkedFromChatId ? { forkedFromChatId: event.forkedFromChatId } : {}),
           ...(event.createdByChatId ? { createdByChatId: event.createdByChatId } : {}),
+          ...(event.delegator ? { delegator: true as const } : {}),
         }
         this.state.chatsById.set(chat.id, chat)
+        break
+      }
+      case "chat_delegator_set": {
+        const chat = this.state.chatsById.get(event.chatId)
+        if (!chat) break
+        // A setting, not activity: `updatedAt` stays put so the sidebar does not reorder.
+        if (event.delegator) chat.delegator = true
+        else delete chat.delegator
         break
       }
       case "chat_report_owed_set": {
@@ -1419,7 +1429,11 @@ export class EventStore {
     return write
   }
 
-  async createChat(projectId: string, lineage?: { parentChatId?: string; createdByChatId?: string }) {
+  async createChat(
+    projectId: string,
+    lineage?: { parentChatId?: string; createdByChatId?: string },
+    options?: { delegator?: boolean },
+  ) {
     const project = this.state.projectsById.get(projectId)
     if (!project || project.deletedAt) {
       throw new Error("Project not found")
@@ -1434,6 +1448,7 @@ export class EventStore {
       title: "New Chat",
       ...(lineage?.parentChatId ? { parentChatId: lineage.parentChatId } : {}),
       ...(lineage?.createdByChatId ? { createdByChatId: lineage.createdByChatId } : {}),
+      ...(options?.delegator ? { delegator: true } : {}),
     }
     await this.append(this.chatsLogPath, event)
     return this.state.chatsById.get(chatId)!
@@ -1645,6 +1660,8 @@ export class EventStore {
       if (chat.deletedAt || chat.archivedAt || chat.pinnedAt || protectedChatIds.has(chat.id)) continue
       if (now - chat.createdAt < maxAgeMs) continue
       if (chat.hasMessages) continue
+      // Made empty on purpose, to be sent to later.
+      if (chat.delegator) continue
       // Peek without inserting into the transcript cache — the prune sweep
       // must not evict actively streaming chats.
       const entries = this.transcriptCache.get(chat.id)
@@ -1849,6 +1866,20 @@ export class EventStore {
       timestamp: Date.now(),
       chatId,
       owed,
+    }
+    await this.append(this.chatsLogPath, event)
+  }
+
+  /** Makes a chat a delegator, or an ordinary chat again. See `ChatRecord.delegator`. */
+  async setChatDelegator(chatId: string, delegator: boolean) {
+    const chat = this.requireChat(chatId)
+    if (Boolean(chat.delegator) === delegator) return
+    const event: ChatEvent = {
+      v: STORE_VERSION,
+      type: "chat_delegator_set",
+      timestamp: Date.now(),
+      chatId,
+      delegator,
     }
     await this.append(this.chatsLogPath, event)
   }

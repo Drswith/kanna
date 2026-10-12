@@ -2745,4 +2745,32 @@ describe("transcript windows", () => {
     expect(ws.sent).toHaveLength(2)
     expect(ws.sent[1]).toEqual({ v: PROTOCOL_VERSION, type: "ack", id: "bg" })
   })
+
+  test("chat.create makes a delegator when asked, and chat.setDelegator changes one", async () => {
+    const calls: unknown[] = []
+    const router = createTestRouter({
+      store: createFakeStore({
+        createChat: async (projectId: string, lineage: unknown, options: unknown) => {
+          calls.push(["create", projectId, lineage, options])
+          return { id: `chat-${calls.length}` }
+        },
+        setChatDelegator: async (chatId: string, delegator: boolean) => { calls.push(["set", chatId, delegator]) },
+      }),
+    })
+    const ws = new FakeWebSocket()
+    const send = (id: string, command: unknown) => router.handleMessage(ws as never, JSON.stringify({ v: 1, type: "command", id, command }))
+
+    await send("a", { type: "chat.create", projectId: "project-1", delegator: true })
+    await send("b", { type: "chat.create", projectId: "project-1" })
+    await send("c", { type: "chat.setDelegator", chatId: "chat-1", delegator: false })
+
+    expect(calls).toEqual([
+      ["create", "project-1", undefined, { delegator: true }],
+      ["create", "project-1", undefined, { delegator: undefined }],
+      ["set", "chat-1", false],
+    ])
+    // The new chat's id comes back on the ack, as for any chat.
+    expect(ws.sent).toContainEqual({ v: PROTOCOL_VERSION, type: "ack", id: "a", result: { chatId: "chat-1" } })
+    expect(ws.sent).toContainEqual({ v: PROTOCOL_VERSION, type: "ack", id: "c" })
+  })
 })

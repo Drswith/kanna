@@ -293,6 +293,7 @@ export function deriveSidebarData(
           canFork: canForkChat(chat, activeStatuses, drainingChatIds) || undefined,
           ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}),
           ...(chat.parentChatId && chat.adopted ? { adopted: true as const } : {}),
+          ...(chat.delegator ? { delegator: true as const } : {}),
         }
       })
   }
@@ -459,6 +460,7 @@ export function deriveChatSnapshot(
     sessionToken: chat.sessionToken,
     ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}),
     ...(chat.parentChatId && chat.adopted ? { adopted: true as const } : {}),
+    ...(chat.delegator ? { delegator: true as const } : {}),
     ...(subagents?.length ? { subagents: [...subagents] } : {}),
     ...(schedules.length ? { schedules } : {}),
   }

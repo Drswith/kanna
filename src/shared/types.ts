@@ -1166,6 +1166,11 @@ export interface SidebarChatRow {
    * `shared/sub-chat.ts` is the rule. Never false; absent on every other row.
    */
   adopted?: true
+  /**
+   * Set on a delegator: a chat that hands work to the chats under it instead
+   * of doing it. Never false; absent on every other row.
+   */
+  delegator?: true
 }
 
 /**
@@ -2622,6 +2627,8 @@ export interface ChatRuntime {
   parentChatId?: string
   /** Set when that parent adopted the chat. The same value as `SidebarChatRow.adopted`. */
   adopted?: true
+  /** Set on a delegator. The same value as `SidebarChatRow.delegator`. */
+  delegator?: true
 }
 
 export interface ChatSnapshot {

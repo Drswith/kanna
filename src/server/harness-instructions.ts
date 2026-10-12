@@ -23,6 +23,25 @@ export const KANNA_ORCHESTRATION_INSTRUCTIONS = [
   "- Stopping this chat stops the sub-chats it started, not ones it adopted. Stop one yourself with `cancel_chat` when it is no longer needed.",
 ].join("\n")
 
+/**
+ * What a delegator's agent is told, on top of the chat tools. See
+ * `ChatRecord.delegator`. Only a delegator's session carries it, and every
+ * one of its turns pays for it, so it stays short.
+ *
+ * The parent rule is stated though the orchestrator enforces it: an agent
+ * that knows its chats report back plans around the reports.
+ */
+export const KANNA_DELEGATOR_INSTRUCTIONS = [
+  "# This chat is a delegator",
+  "",
+  "This chat coordinates work. It is not where the work is done. When a message comes in, almost always hand it to another chat. Answer directly only a quick question you can settle from what you already know.",
+  "",
+  "- For each task, look at the chats under this one (`list_chats` with `parentChatId` set to this chat's id, which `get_context` gives). If one already covers that area, send the task there with `send_message`, steering or queueing as fits. If none does, start a sub-chat with `create_chat`. Tell the user which you did.",
+  "- Every chat you hand work to has this chat as its parent: `create_chat` as a sub-chat, and `adopt: true` on `send_message` to a chat you did not start. Kanna applies both here whatever you pass.",
+  "- Several unrelated tasks in one message go to several chats.",
+  "- When a chat reports, tell the user briefly what came back. Do not redo or re-check its work yourself.",
+].join("\n")
+
 export const KANNA_VISUALIZATION_INSTRUCTIONS = [
   "# Kanna visualizations",
   "",
@@ -40,16 +59,27 @@ export const KANNA_VISUALIZATION_INSTRUCTIONS = [
  *
  * `tools: false` is for a harness that is not handed the Kanna tools, which
  * must not be told to call them.
+ *
+ * `delegator` adds what a delegator chat is told. It hands work off with the
+ * chat tools, so a harness without them is told nothing of it.
  */
-export function buildKannaSystemInstructions(agentId: string, options?: { tools?: boolean }): string {
+export function buildKannaSystemInstructions(agentId: string, options?: KannaInstructionOptions): string {
+  const tools = options?.tools !== false
   return [
     buildKannaAttributionInstructions(agentId),
     KANNA_CHAT_LINK_INSTRUCTIONS,
-    ...(options?.tools === false ? [] : [KANNA_ORCHESTRATION_INSTRUCTIONS, KANNA_VISUALIZATION_INSTRUCTIONS]),
+    ...(tools ? [KANNA_ORCHESTRATION_INSTRUCTIONS] : []),
+    ...(tools && options?.delegator ? [KANNA_DELEGATOR_INSTRUCTIONS] : []),
+    ...(tools ? [KANNA_VISUALIZATION_INSTRUCTIONS] : []),
   ].join("\n\n")
 }
 
+export interface KannaInstructionOptions {
+  tools?: boolean
+  delegator?: boolean
+}
+
 /** Wrapped for the providers that have no system-prompt append hook (cursor, grok). */
-export function buildKannaSystemMessage(agentId: string, options?: { tools?: boolean }): string {
+export function buildKannaSystemMessage(agentId: string, options?: KannaInstructionOptions): string {
   return `<system-message>${buildKannaSystemInstructions(agentId, options)}</system-message>`
 }

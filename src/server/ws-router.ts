@@ -1625,7 +1625,11 @@ export function createWsRouter({
         // The chat actions are defined in chat-commands.ts, where the agents'
         // tools reach them too. Only the ack and the push are done here.
         case "chat.create": {
-          await finishChatCommand(ws, id, await chatCommands.create(command.projectId))
+          await finishChatCommand(ws, id, await chatCommands.create(command.projectId, undefined, { delegator: command.delegator }))
+          return
+        }
+        case "chat.setDelegator": {
+          await finishChatCommand(ws, id, await chatCommands.setDelegator(command.chatId, command.delegator))
           return
         }
         case "chat.fork": {
