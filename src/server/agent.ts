@@ -27,6 +27,7 @@ import type {
   SubagentActivity,
   MessageSource,
   TranscriptEntry,
+  WaitingOn,
 } from "../shared/types"
 import { normalizeToolCall } from "../shared/tools"
 import type { ClientCommand } from "../shared/protocol"
@@ -1284,6 +1285,25 @@ export class AgentCoordinator {
       if (!statuses.has(chatId)) statuses.set(chatId, "waiting_on_subagent")
     }
     return statuses
+  }
+
+  /**
+   * What a chat that reads `waiting_on_subagent` is waiting on, by the two
+   * checks `getChatStatuses` makes. Meaningful only for such a chat.
+   *
+   * An agent running inside a workflow that is itself running is that
+   * workflow's, and is not counted beside it: the Tasks widget gives it no
+   * row of its own either.
+   */
+  getWaitingOn(chatId: string): WaitingOn {
+    const byId = this.subagents.get(chatId)
+    let agents = 0
+    for (const activity of byId?.values() ?? []) {
+      if (activity.status !== "running" || !isDelegatedTask(activity.type)) continue
+      if (activity.workflowId && byId?.get(activity.workflowId)?.status === "running") continue
+      agents += 1
+    }
+    return { chats: this.orchestration?.countSubchatsHolding(chatId) ?? 0, agents }
   }
 
   getPendingTool(chatId: string): PendingToolSnapshot | null {

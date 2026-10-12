@@ -55,7 +55,7 @@ import {
   EMPTY_STATE_TEXT,
 } from "./utils"
 import type { EditorOpenSettings, EditorPreset, OpenExternalAction, TerminalPreset } from "../../../shared/protocol"
-import type { TranscriptOutlineEntry } from "../../../shared/types"
+import type { TranscriptOutlineEntry, WaitingOn } from "../../../shared/types"
 /**
  * How close to the bottom counts as "at the end", as a fraction of viewport
  * height.
@@ -258,6 +258,8 @@ interface ChatTranscriptViewportProps {
   latestToolIds: KannaState["latestToolIds"]
   isProcessing: boolean
   runtimeStatus: string | null
+  /** What the chat is waiting on, while that is its status. */
+  waitingOn?: WaitingOn
   isDraining: boolean
   commandError: string | null
   onStopDraining: () => void
@@ -468,6 +470,7 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
   latestToolIds,
   isProcessing,
   runtimeStatus,
+  waitingOn,
   isDraining,
   commandError,
   onStopDraining,
@@ -1130,7 +1133,7 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
           it is not processing. It is not finished either, and this line is
           what says so here. A draining stream says it with its own, below. */}
       {isProcessing || (runtimeStatus === "waiting_on_subagent" && !isDraining)
-        ? <ProcessingMessage status={runtimeStatus ?? undefined} />
+        ? <ProcessingMessage status={runtimeStatus ?? undefined} waitingOn={waitingOn} />
         : null}
       {queuedMessages.map((message) => (
         <QueuedUserMessage

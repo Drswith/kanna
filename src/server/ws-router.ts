@@ -37,6 +37,7 @@ import type {
   LlmProviderValidationResult,
   UsageLimitsSnapshot,
   ChatPreview,
+  WaitingOn,
 } from "../shared/types"
 
 
@@ -398,6 +399,14 @@ export function createWsRouter({
       pendingToolKinds.set(chatId, pendingTool.toolKind)
       if (pendingTool.preview) pendingUserInputPreviews.set(chatId, pendingTool.preview)
     }
+    // How many of what, for the chats that are waiting. Optional on the
+    // agent for the same reason as `getChatStatuses`.
+    const waitingOn = new Map<string, WaitingOn>()
+    for (const [chatId, status] of activeStatuses) {
+      if (status !== "waiting_on_subagent") continue
+      const counts = agent.getWaitingOn?.(chatId)
+      if (counts) waitingOn.set(chatId, counts)
+    }
     // Every input to the derive, in one string. `stateVersion` now moves only
     // when an append changed something the sidebar can show (see
     // `sidebarVisibleSignature` in event-store), so a streaming turn re-derives
@@ -414,6 +423,9 @@ export function createWsRouter({
       // Two questions of the same kind back to back share a tool kind, so the
       // text has to be in the key or the second one would show the first.
       JSON.stringify([...pendingUserInputPreviews].sort()),
+      // A chat stays waiting while the count under it falls, so the status
+      // alone would not say the row had changed.
+      JSON.stringify([...waitingOn].sort(([left], [right]) => left.localeCompare(right))),
     ].join("|")
     // A store without a version (the router tests' stubs mutate state
     // directly) gets no memo rather than a stale sidebar.
@@ -427,6 +439,7 @@ export function createWsRouter({
       drainingChatIds,
       pendingToolKinds,
       pendingUserInputPreviews,
+      waitingOn,
       workingTrees: worktreeProbe.getStates(),
       repoLabels: worktreeProbe.getRepoLabels(),
       projectsWithoutRepo: worktreeProbe.getProjectsWithoutRepo(),
@@ -639,7 +652,8 @@ export function createWsRouter({
           agent.getDrainingChatIds(),
           topic.chatId,
           (chatId) => store.getClientTranscript(chatId),
-          agent.getSubagents?.(topic.chatId)
+          agent.getSubagents?.(topic.chatId),
+          agent.getWaitingOn?.(topic.chatId)
         ),
       },
     }
@@ -674,7 +688,8 @@ export function createWsRouter({
       agent.getDrainingChatIds(),
       chatId,
       (id) => store.getClientTranscript(id, fromIndex ?? getEarliestChatWindowStart(id)),
-      agent.getSubagents?.(chatId)
+      agent.getSubagents?.(chatId),
+      agent.getWaitingOn?.(chatId)
     )
     if (cache) {
       (cache.chat ??= new Map()).set(key, data)

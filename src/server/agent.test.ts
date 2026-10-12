@@ -3380,6 +3380,30 @@ describe("waiting on a subagent", () => {
     expect(agent.getSubagents("chat-1").find((task) => task.id === "sh1")).toMatchObject({ status: "running" })
   })
 
+  test("counts the agents a chat is waiting on, a workflow and its own agents as one", () => {
+    const agent = coordinator()
+    agent.applySubagentActivity("chat-1", { kind: "started", id: "a1", type: "subagent", label: "explore" }, 1000)
+    agent.applySubagentActivity("chat-1", { kind: "started", id: "a2", type: "subagent", label: "review" }, 1000)
+    agent.applySubagentActivity("chat-1", { kind: "started", id: "sh1", type: "shell", label: "bun run dev" }, 1000)
+    agent.applySubagentActivity("chat-1", { kind: "started", id: "m1", type: "monitor", label: "Watch CI" }, 1000)
+    expect(agent.getWaitingOn("chat-1")).toEqual({ chats: 0, agents: 2 })
+
+    agent.applySubagentActivity("chat-1", { kind: "started", id: "w1", type: "workflow", label: "review", workflowName: "review" }, 2000)
+    agent.applySubagentActivity("chat-1", { kind: "started", id: "wa1", type: "subagent", label: "general-purpose" }, 2100)
+    agent.applySubagentActivity("chat-1", {
+      kind: "progress",
+      id: "w1",
+      workflow: { phases: [], agents: [{ index: 0, label: "Review", state: "running", agentId: "wa1" }] },
+    }, 2200)
+    // The workflow's agent is the workflow's: three, not four.
+    expect(agent.getWaitingOn("chat-1")).toEqual({ chats: 0, agents: 3 })
+
+    agent.applySubagentActivity("chat-1", { kind: "stopped", id: "a1", failed: false }, 3000)
+    agent.applySubagentActivity("chat-1", { kind: "stopped", id: "w1", failed: false }, 3000)
+    agent.applySubagentActivity("chat-1", { kind: "stopped", id: "wa1", failed: false }, 3000)
+    expect(agent.getWaitingOn("chat-1")).toEqual({ chats: 0, agents: 1 })
+  })
+
   test("only work handed to another agent is a wait", () => {
     const waits = (type: string) => {
       const agent = coordinator()

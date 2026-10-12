@@ -3,6 +3,7 @@ import { Loader2, MessageCircle, PencilLine, Workflow } from "lucide-react"
 import type { SidebarChatRow } from "../../../shared/types"
 import type { SidebarThread } from "../../lib/thread-sections"
 import { cn } from "../../lib/utils"
+import { waitingOnLabel } from "../../lib/waiting-on"
 import { AnimatedShinyText } from "../ui/animated-shiny-text"
 import { ProjectIcon } from "../ui/project-icon"
 import { PROVIDER_ICONS } from "./ChatPreferenceControls"
@@ -45,7 +46,7 @@ export function renderChatStatusDot(chat: SidebarChatRow): ReactNode | null {
   // Tasks widget, which is where the work is. Ahead of the unread ping,
   // because the reply it would flag is not the chat's last word.
   if (chat.status === "waiting_on_subagent") {
-    return <span className={STATUS_MARK_SLOT_CLASS}><Loader2 aria-label="Waiting on a subagent" className="size-3.5 animate-spin text-muted-foreground" /></span>
+    return <span className={STATUS_MARK_SLOT_CLASS}><Loader2 aria-label={waitingOnLabel(chat.waitingOn)} className="size-3.5 animate-spin text-muted-foreground" /></span>
   }
   const color = chat.status === "waiting_for_user" ? "blue" : chat.unread ? "emerald" : null
   if (!color) return null

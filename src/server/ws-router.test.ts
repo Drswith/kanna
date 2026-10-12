@@ -1258,6 +1258,52 @@ describe("ws-router", () => {
     expect(ws.sent).toHaveLength(6)
   })
 
+  test("a waiting chat's count reaches the sidebar when it changes, though its status has not", async () => {
+    const state = createEmptyState()
+    state.projectsById.set("project-1", { id: "project-1", localPath: "/tmp/project", title: "Project", createdAt: 1, updatedAt: 1 })
+    state.chatsById.set("chat-1", {
+      id: "chat-1",
+      projectId: "project-1",
+      title: "Chat",
+      createdAt: 1,
+      updatedAt: 1,
+      unread: false,
+      provider: null,
+      planMode: false,
+      autoPlan: false,
+      sessionToken: null,
+      lastTurnOutcome: null,
+    })
+    let chats = 2
+    const router = createTestRouter({
+      // Versioned, as the real store is, so the sidebar is memoized: a count
+      // left out of the memo's key would be served stale from it.
+      store: createFakeStore({ state, stateVersion: 1 }),
+      agent: {
+        getActiveStatuses: () => new Map(),
+        getChatStatuses: () => new Map([["chat-1", "waiting_on_subagent"]]),
+        getWaitingOn: () => ({ chats, agents: 0 }),
+        getDrainingChatIds: () => new Set(),
+      } as never,
+    })
+    const ws = new FakeWebSocket()
+    router.handleOpen(ws as never)
+    ws.data.subscriptions.set("sidebar-1", { type: "sidebar" })
+
+    await router.broadcastChatChange({ sidebar: true })
+    expect(JSON.stringify(ws.sent.at(-1))).toContain('"waitingOn":{"chats":2,"agents":0}')
+    const sentBefore = ws.sent.length
+
+    // Nothing moved: nothing sent.
+    await router.broadcastChatChange({ sidebar: true })
+    expect(ws.sent).toHaveLength(sentBefore)
+
+    chats = 1
+    await router.broadcastChatChange({ sidebar: true })
+    expect(ws.sent.length).toBeGreaterThan(sentBefore)
+    expect(JSON.stringify(ws.sent.at(-1))).toContain('"chats":1')
+  })
+
   test("subscribes to project git snapshots independently from chat snapshots", async () => {
     const state = createEmptyState()
     state.projectsById.set("project-1", {

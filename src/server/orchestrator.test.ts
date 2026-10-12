@@ -316,6 +316,46 @@ describe("waiting on a subagent", () => {
     await until(() => !agent.getChatStatuses().has(root), "the parent to come to rest")
   })
 
+  test("a waiting chat says how many chats and agents it is waiting on, and the count falls as they finish", async () => {
+    const { orchestrator, codex, store, agent, userChat } = await setup()
+    const root = await userChat()
+    const first = await orchestrator.createChat(root, { message: "one" })
+    const second = await orchestrator.createChat(root, { message: "two" })
+    agent.applySubagentActivity(root, { kind: "started", id: "a1", type: "subagent", label: "explore" })
+    // Neither is something it is waiting on, so neither is counted.
+    agent.applySubagentActivity(root, { kind: "started", id: "sh1", type: "shell", label: "bun run dev" })
+    agent.applySubagentActivity(root, { kind: "started", id: "m1", type: "monitor", label: "Watch CI" })
+    codex.finish(root, "Handed off.")
+    await until(() => agent.getChatStatuses().get(root) === "waiting_on_subagent", "the parent to wait")
+
+    const shown = () => {
+      const waitingOn = new Map([[root, agent.getWaitingOn(root)]])
+      const row = deriveSidebarData(store.state, agent.getChatStatuses(), { waitingOn }).projectGroups[0]!.chats.find((chat) => chat.chatId === root)
+      const snapshot = deriveChatSnapshot(store.state, agent.getChatStatuses(), new Set(), root, () => ({ messages: [], startIndex: 0, readAnchor: null }), undefined, agent.getWaitingOn(root))
+      // The row and the chat's own page are told the same thing.
+      expect(snapshot?.runtime.waitingOn).toEqual(row?.waitingOn)
+      return row?.waitingOn
+    }
+    expect(shown()).toEqual({ chats: 2, agents: 1 })
+
+    agent.applySubagentActivity(root, { kind: "stopped", id: "a1", failed: false })
+    expect(shown()).toEqual({ chats: 2, agents: 0 })
+
+    // A sub-chat that finishes reports, which starts a turn: no longer a wait.
+    codex.finish(first.chatId, "one done")
+    await until(() => codex.turnsFor(root).length === 2, "the report's turn")
+    expect(shown()).toBeUndefined()
+    codex.finish(root, "Noted.")
+    await until(() => agent.getChatStatuses().get(root) === "waiting_on_subagent", "the parent to wait again")
+    expect(shown()).toEqual({ chats: 1, agents: 0 })
+
+    codex.finish(second.chatId, "two done")
+    await until(() => codex.turnsFor(root).length === 3, "the last report's turn")
+    codex.finish(root, "Done.")
+    await until(() => !agent.getChatStatuses().has(root), "the parent to come to rest")
+    expect(shown()).toBeUndefined()
+  })
+
   test("the wait reaches every chat above the one still going", async () => {
     const { orchestrator, codex, agent, userChat } = await setup()
     const root = await userChat()

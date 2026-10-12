@@ -350,6 +350,11 @@ export class ChatOrchestrator {
     return this.childrenOf(chatId).some((child) => this.holdsParent(child))
   }
 
+  /** How many sub-chats are holding this chat in its wait: the count behind `hasLiveSubchats`. */
+  countSubchatsHolding(chatId: string) {
+    return this.childrenOf(chatId).filter((child) => this.holdsParent(child)).length
+  }
+
   /**
    * Whether this sub-chat keeps its parent from being finished. One the
    * parent started does for as long as it works. An adopted one has turns its

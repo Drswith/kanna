@@ -1413,6 +1413,7 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
           latestToolIds={state.latestToolIds}
           isProcessing={state.isProcessing}
           runtimeStatus={state.runtimeStatus}
+          waitingOn={state.runtime?.waitingOn}
           isDraining={state.isDraining}
           commandError={state.commandError}
           onStopDraining={state.handleStopDraining}
