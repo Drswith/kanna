@@ -14,8 +14,9 @@ import { renderChatStatusDot } from "../../components/chat-ui/ThreadRowContent"
 import { scheduleEditPrompt } from "../../components/chat-ui/widgets/SchedulesWidget"
 import { TranscriptRenderOptionsProvider } from "../../components/messages/render-context"
 import { ToolPayloadProvider } from "../../components/messages/tool-payload-context"
-import { ViewerIconButton, ViewerSurface } from "../../components/viewer/ViewerSurface"
+import { useViewerMotion, ViewerIconButton, ViewerSurface } from "../../components/viewer/ViewerSurface"
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow"
+import { cn } from "../../lib/utils"
 import { viewerLevelBelow } from "../../lib/viewer-levels"
 import { snapshotDroppedFiles } from "../../lib/snapshotDroppedFiles"
 import { useAppSettingsStore } from "../../stores/appSettingsStore"
@@ -195,6 +196,13 @@ function ChatPreviewSession({ chatId, title, projectId: sidebarProjectId, projec
   const editorPreset = useTerminalPreferencesStore((store) => store.editorPreset)
   const editorCommandTemplate = useTerminalPreferencesStore((store) => store.editorCommandTemplate)
 
+  // Whether the transcript has something to show: rows, or the server's word
+  // that there are none. And whether its arrival fades (`ViewerMotion`): as
+  // it was when this chat was opened, and not for one opened from the keyboard.
+  const transcriptReady = session.messages.length > 0 || session.chatSnapshot !== null
+  const motion = useViewerMotion()
+  const [fadesIn] = useState(motion.bodyEnters || motion.cardEnters)
+
   // Tells the background follower this chat has a full-rate subscription.
   useEffect(() => useViewerStore.getState().holdLiveChat(chatId), [chatId])
 
@@ -302,7 +310,18 @@ function ChatPreviewSession({ chatId, title, projectId: sidebarProjectId, projec
   return (
     <ChatSchedulesProvider value={chatSchedules}>
       <div ref={cardRef} className="relative flex h-full min-h-0 flex-col overflow-hidden" onDragOver={handleDragOver} onDrop={handleDrop}>
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          // The transcript is drawn once there is one to draw. Until then the
+          // card holds the composer and an empty column, which is the chat's
+          // skeleton; what must not happen is rows landing on it with a snap.
+          // A chat whose window was already held (most are) is ready on its
+          // first render and has nothing to fade from.
+          data-ready={transcriptReady || undefined}
+          className={cn(
+            "relative flex min-h-0 flex-1 flex-col overflow-hidden opacity-0 data-[ready]:opacity-100",
+            fadesIn && "transition-opacity duration-150 ease-snappy motion-reduce:transition-none",
+          )}
+        >
           <TranscriptRenderOptionsProvider value={transcriptRenderOptions}>
           <ToolPayloadProvider store={toolPayloadStore}>
           <ChatTranscriptViewport

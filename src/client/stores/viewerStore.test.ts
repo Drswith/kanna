@@ -27,11 +27,15 @@ describe("viewerStore", () => {
     expect(getChatViewer()).toEqual({ item: FILE, expanded: true, widthPx: 700 })
   })
 
-  test("a dragged width holds within a kind and resets across review and preview", () => {
+  test("a dragged width holds for as long as the pane is open, whatever opens in it", () => {
     openViewer(FILE)
     useViewerStore.getState().setWidth(700)
     openViewer({ ...FILE, path: "docs/b.md" })
     expect(getChatViewer()?.widthPx).toBe(700)
+    openViewer(DIFF)
+    expect(getChatViewer()?.widthPx).toBe(700)
+    // Shut and opened again, the pane takes the width of what it opens on.
+    useViewerStore.getState().close()
     openViewer(DIFF)
     expect(getChatViewer()?.widthPx).toBeUndefined()
   })
@@ -69,11 +73,11 @@ describe("viewerStore", () => {
     })
   })
 
-  test("a chat preview has a width of its own, apart from a file's", () => {
+  test("a chat opened over a file arrives in the pane as it stands", () => {
     openViewer(FILE)
     useViewerStore.getState().setWidth(700)
     openViewer(CHAT)
-    expect(getChatViewer()).toEqual({ item: CHAT, expanded: false })
+    expect(getChatViewer()).toEqual({ item: CHAT, expanded: false, widthPx: 700 })
     useViewerStore.getState().setWidth(520)
     openViewer({ kind: "chat", chatId: "sub-2", back: ["sub-1"] })
     expect(getChatViewer()?.widthPx).toBe(520)
@@ -211,7 +215,7 @@ describe("viewerStore", () => {
       useViewerStore.getState().setFloor(LIST)
       useViewerStore.getState().setWidth(440)
       openViewer(FILE)
-      expect(getChatViewer()?.widthPx).toBeUndefined()
+      expect(getChatViewer()?.widthPx).toBe(440)
       useViewerStore.getState().close()
       expect(getChatViewer()).toEqual({ item: LIST, expanded: false, widthPx: 440 })
     })

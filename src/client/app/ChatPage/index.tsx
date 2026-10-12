@@ -1293,13 +1293,14 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
 
   useEffect(() => () => viewerExpandAnimationRef.current?.cancel(), [])
 
-  // Opening slides the pane in, as the terminal and widget column slide, and
-  // so does going between a review and a preview; closing slides it shut
-  // around the viewer, which stays on screen for it (usePresentedViewer).
-  // Another chat, or a group that's new (another project, a phone turned
-  // desktop), takes its layout without the slide, as does reduced motion.
-  // Stepping between files of one kind leaves the split as it is. A width
-  // you dragged the pane to is the chat's, and it opens at it again.
+  // Opening slides the pane in, as the terminal and widget column slide;
+  // closing slides it shut around the viewer, which stays on screen for it
+  // (usePresentedViewer). Another chat, or a group that's new (another
+  // project, a phone turned desktop), takes its layout without the slide, as
+  // does reduced motion. While the pane stays open the split holds, whatever
+  // comes to be shown in it: it takes its width when it opens, from what it
+  // opens on. A width you dragged the pane to is the chat's, and it opens at
+  // it again.
   //
   // Expanded over the chat, the split is left alone, and coming out of
   // expanded it's set in one step behind the card: the chat's width is
@@ -1310,11 +1311,10 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     const state = viewerPaneState(viewerPaneOpen, viewerExpanded)
     viewerSplitStateRef.current = { group, state, chatKey: viewerChatKey }
     if (!group) return
-    const move = resolveViewerSplitMove(
-      previous.state,
-      state,
-      previous.group === group && previous.chatKey === viewerChatKey && !prefersReducedMotion(),
-    )
+    const move = resolveViewerSplitMove(previous.state, state, {
+      samePane: previous.group === group && previous.chatKey === viewerChatKey,
+      reducedMotion: prefersReducedMotion(),
+    })
     // A slide already under way goes on to where it was headed.
     if (move.to === "hold") return
     if (viewerSplitAnimationRef.current !== null) {

@@ -32,11 +32,6 @@ export type ViewerLevelBelow =
   /** It is the floor. There is nowhere to go back to, and it does not close. */
   | "floor"
 
-/** A chat, the graph and a delegator's list share a pane width; see `viewerWidthClass`. */
-function sharesChatWidth(item: ViewerItem) {
-  return item.kind === "chat" || item.kind === "graph" || item.kind === "delegated"
-}
-
 function sameItem(left: ViewerItem, right: ViewerItem) {
   return left.kind === "delegated" && right.kind === "delegated" && left.chatId === right.chatId
 }
@@ -47,7 +42,7 @@ export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): 
   // the width it had.
   if (level.returnTo) return { ...level.returnTo }
 
-  // From here down everything shares the pane's width, so it carries over.
+  // An open pane keeps its width whatever it shows, so it carries over.
   const kept = level.widthPx !== undefined ? { widthPx: level.widthPx } : {}
   if (item.kind === "chat") {
     const origin = {
@@ -67,7 +62,7 @@ export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): 
 
   if (!floor) return "closed"
   if (sameItem(item, floor)) return "floor"
-  return { item: floor, ...(sharesChatWidth(item) ? kept : {}) }
+  return { item: floor, ...kept }
 }
 
 /** Whether Back has somewhere to go: a level under this one that is not the pane shut. */

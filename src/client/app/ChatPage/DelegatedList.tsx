@@ -80,6 +80,8 @@ export const DelegatedList = memo(function DelegatedList({ item, onClose }: {
         </ViewerIconButton>
       )}
       onClose={onClose}
+      // Back from a chat is a new card: it opens where the list was left.
+      scrollMemoryKey={`delegated:${item.chatId}`}
     >
       {/* The sidebar's own gutter, so the rows sit in the card as they sit in
           the sidebar. The card's end padding keeps the last one off the

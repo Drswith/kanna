@@ -61,9 +61,9 @@ export type ViewerItem =
   | { kind: "delegated"; chatId: string }
 
 /**
- * What a pane's dragged width belongs to. A review, a preview and a chat
- * each open at a width of their own, and a width you dragged holds while you
- * go between things of one class.
+ * What decides the width a pane opens at: a review, a preview and a chat
+ * each open at a width of their own. Only that. Once open, the pane keeps
+ * the width it has, whatever is shown in it next (`lib/viewer-split`).
  */
 export type ViewerWidthClass = "review" | "chat" | "preview"
 
@@ -115,6 +115,12 @@ interface ViewerState {
   /** The chat a mounted previewer holds a subscription on; see `usePreviewedChatId`. */
   liveChatId: string | null
   /**
+   * Whether what the pane shows was last changed from the keyboard (Escape,
+   * Enter on Back, the command palette). What arrives then arrives at once:
+   * the fade a pointer's change gets would only be a delay on a key.
+   */
+  changedByKey: boolean
+  /**
    * What the page's pane rests on and cannot close past, or null on a page
    * whose pane closes: every page but a delegator's on a desktop.
    */
@@ -149,6 +155,18 @@ interface ViewerState {
   clearChatJump: (requestId: string) => void
 }
 
+/**
+ * Whether the action being handled right now came from the keyboard: a key,
+ * or the click a key makes on a focused button (`detail` 0). Read off the
+ * event in flight, like `isBackgroundOpenClick`, since the store's actions
+ * are called through several layers that do not carry it.
+ */
+function isKeyboardInitiated() {
+  const event = typeof window === "undefined" ? undefined : window.event
+  if (typeof KeyboardEvent !== "undefined" && event instanceof KeyboardEvent) return true
+  return typeof MouseEvent !== "undefined" && event instanceof MouseEvent && event.type === "click" && event.detail === 0
+}
+
 function currentViewer(chatKey: string) {
   return useRightSidebarStore.getState().chatViewers[chatKey] ?? null
 }
@@ -166,6 +184,7 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
   chatPreviewHosts: 0,
   chatJump: null,
   liveChatId: null,
+  changedByKey: false,
   floor: null,
   setFloor: (floor) => {
     const { chatKey } = get()
@@ -193,9 +212,7 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
     const current = currentViewer(chatKey)
     // The pane's own setting, under an item that opened expanded.
     const expanded = current ? current.expandedBefore ?? current.expanded : false
-    // A dragged width holds while you look at things of one kind: a review,
-    // a preview and a chat each open at their own width.
-    const sameKind = current !== null && viewerWidthClass(current.item) === viewerWidthClass(item)
+    // An open pane keeps the width it was dragged to, whatever opens in it.
     // Something else opened over a chat preview keeps the way back to it,
     // through any number of files and images after it. Another chat doesn't:
     // that is the previewer moving on.
@@ -208,10 +225,10 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
       item,
       expanded: options?.expanded || expanded,
       ...(options?.expanded && !expanded ? { expandedBefore: false } : {}),
-      ...(sameKind && current.widthPx !== undefined ? { widthPx: current.widthPx } : {}),
+      ...(current?.widthPx !== undefined ? { widthPx: current.widthPx } : {}),
       ...(returnTo ? { returnTo } : {}),
     })
-    set((state) => ({ openCount: state.openCount + 1 }))
+    set((state) => ({ openCount: state.openCount + 1, changedByKey: isKeyboardInitiated() }))
   },
   close: () => {
     const { chatKey, floor } = get()
@@ -219,6 +236,7 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
       get().stepBack()
       return
     }
+    set({ changedByKey: isKeyboardInitiated() })
     const current = currentViewer(chatKey)
     if (!current?.returnTo) {
       useRightSidebarStore.getState().setChatViewer(chatKey, null)
@@ -255,7 +273,7 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
       ...(below.widthPx !== undefined ? { widthPx: below.widthPx } : {}),
     })
     // A chat gone back to is opened again, as far as anything keyed on opens can tell.
-    set((state) => ({ openCount: state.openCount + 1 }))
+    set((state) => ({ openCount: state.openCount + 1, changedByKey: isKeyboardInitiated() }))
   },
   setScrolledDiffPath: (path) => updateViewer(get().chatKey, (viewer) => (
     viewer.item.kind !== "diff" || (viewer.reviewPath ?? null) === path

@@ -45,8 +45,8 @@ describe("viewerLevelBelow on a delegator, whose pane has a floor", () => {
   test("anything opened from the transcript goes back to the list", () => {
     expect(viewerLevelBelow({ item: { kind: "chat", chatId: "a" }, widthPx: 500 }, LIST)).toEqual({ item: LIST, widthPx: 500 })
     expect(viewerLevelBelow({ item: { kind: "graph", chatId: "deleg" } }, LIST)).toEqual({ item: LIST })
-    // A file has a width of its own, which the list does not take.
-    expect(viewerLevelBelow({ item: FILE, widthPx: 800 }, LIST)).toEqual({ item: LIST })
+    // The pane's width is the pane's: a file leaves it as it found it.
+    expect(viewerLevelBelow({ item: FILE, widthPx: 500 }, LIST)).toEqual({ item: LIST, widthPx: 500 })
   })
 
   test("something opened inside a previewed chat goes back to that chat first", () => {

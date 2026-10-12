@@ -73,10 +73,91 @@ export interface ViewerFloorState {
 const ViewerFloorContext = createContext<ViewerFloorState | null>(null)
 export const ViewerFloorProvider = ViewerFloorContext.Provider
 
+/**
+ * What a card mounting now should animate, which depends on what was there a
+ * moment ago and only the layer that places cards knows that.
+ *
+ * Every kind of content draws its own card, so a change of kind unmounts one
+ * card and mounts another in the same place. The frame is identical before
+ * and after, and a frame that is the same must not move: played on each
+ * mount, the card's entrance made the whole pane leave and come back to show
+ * a chat picked from a list. So the entrance belongs to the pane opening
+ * (`viewerCardEnters`), and a card mounted into an open pane arrives still.
+ *
+ * What does change then is the body, and it gets the least that takes the
+ * snap off: opacity, 150ms, on the app's strong ease-out. Nothing moves, and
+ * the header changes in place. Not for a change made from the keyboard, which
+ * should land at once, and not under reduced motion.
+ */
+export interface ViewerMotion {
+  /** The pane is opening: the card grows in. */
+  cardEnters: boolean
+  /** The pane was open and its content changed by pointer: the body fades in. */
+  bodyEnters: boolean
+}
+
+/** With no layer to say otherwise (a card used on its own), a card is something that just opened. */
+const ViewerMotionContext = createContext<ViewerMotion>({ cardEnters: true, bodyEnters: false })
+export const ViewerMotionProvider = ViewerMotionContext.Provider
+export function useViewerMotion(): ViewerMotion {
+  return useContext(ViewerMotionContext)
+}
+
+/**
+ * The body's fade, as classes for whatever is mounting with new content: a
+ * transition from `@starting-style`, so it needs no state, and a second
+ * change mid-fade simply mounts the next thing.
+ */
+export const VIEWER_BODY_ENTER_CLASS = "transition-opacity duration-150 ease-snappy starting:opacity-0 motion-reduce:transition-none"
+
+/** The card's frame, shared with its stand-in below so the two cannot drift. */
+function viewerCardClass(inPane: boolean, enters: boolean) {
+  return cn(
+    "group/viewer flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border outline-none",
+    // Grown from the edge it stands on. From its centre, as the inset
+    // card grows, the 2% it is short of at the start would lift its foot
+    // off the window's edge and show what is under it for the length of
+    // the entrance. `ViewerLayer` takes the padding out from under it.
+    inPane && "origin-bottom rounded-b-none border-b-0",
+    // The card says once what colour it is, and is painted from that. A
+    // transcript shown in it (a previewed chat) fades and fills with the
+    // same `surface`, in either theme, wherever the card is placed.
+    "bg-surface [--surface:var(--color-background)] dark:[--surface:var(--color-card)]",
+    // Opens like the modal it effectively is: a touch small and faded,
+    // 200ms. Only when the pane itself is opening (`ViewerMotion`): the
+    // transition is always there, for the layer's exit to use, and what
+    // starts it on mount is the starting style. It leaves at once: closing
+    // is you done with it, and a fade would hold it over the chat you went
+    // back to.
+    "transition-[opacity,scale] duration-200 ease-snappy",
+    enters && "starting:scale-[0.98] starting:opacity-0 motion-reduce:starting:scale-100",
+  )
+}
+
+/**
+ * The card with nothing in it yet: what holds the pane while the code for a
+ * view is still being fetched, the first time one of its kind is opened.
+ * Without it the pane was bare for that moment, and the card that then
+ * arrived was one more thing leaving and coming back.
+ */
+export function ViewerCardPlaceholder() {
+  const placement = useContext(ViewerPlacementContext)
+  const motion = useContext(ViewerMotionContext)
+  const [enters] = useState(motion.cardEnters)
+  return (
+    <div aria-hidden data-bleed={placement ? "" : undefined} className={viewerCardClass(placement !== null, enters)}>
+      <div className="h-[49px] shrink-0 border-b border-border" />
+    </div>
+  )
+}
+
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
   return target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT"
 }
+
+/** Where each remembered body was left; see `scrollMemoryKey`. */
+const scrollMemory = new Map<string, number>()
 
 export interface ViewerNavigation {
   index: number
@@ -96,6 +177,7 @@ export function ViewerSurface({
   bodyClassName,
   label,
   scrollKey,
+  scrollMemoryKey,
   center,
   leading,
   fieldsKeepEscape = false,
@@ -128,11 +210,23 @@ export function ViewerSurface({
    * scrolled to the file you clicked).
    */
   scrollKey?: string
+  /**
+   * Names a body whose scroll is worth coming back to: a card mounting with
+   * a key opens where the last card with that key was left. For a list that
+   * things are opened from and gone back to, which is a new card each time.
+   * Kept for the life of the page.
+   */
+  scrollMemoryKey?: string
 }) {
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const placement = useContext(ViewerPlacementContext)
   const floor = useContext(ViewerFloorContext)
+  // As it was when this card mounted: these are entrances, and a card that
+  // has arrived does not play one again because something later changed.
+  const motion = useContext(ViewerMotionContext)
+  const [cardEnters] = useState(motion.cardEnters)
+  const [bodyEnters] = useState(motion.bodyEnters)
   // Resting on the floor: nothing for Escape to do here, so it goes on past
   // this card to whatever is next in line for it (the composer's hold).
   const atFloor = floor !== null && floor.onBack === null && !leading
@@ -155,6 +249,17 @@ export function ViewerSurface({
   useLayoutEffect(() => {
     if (scrollKey !== undefined) bodyRef.current?.scrollTo({ top: 0 })
   }, [scrollKey])
+
+  // Before paint, so the list is never seen at its top first.
+  useLayoutEffect(() => {
+    const body = bodyRef.current
+    if (!scrollMemoryKey || !body) return
+    const remembered = scrollMemory.get(scrollMemoryKey)
+    if (remembered) body.scrollTop = remembered
+    const remember = () => scrollMemory.set(scrollMemoryKey, body.scrollTop)
+    body.addEventListener("scroll", remember, { passive: true })
+    return () => body.removeEventListener("scroll", remember)
+  }, [scrollMemoryKey])
 
   // Focus comes here on open, so its keys work at once and nothing behind
   // (the composer, now inert) keeps it. Not for a pane's floor when focus is
@@ -233,22 +338,7 @@ export function ViewerSurface({
       data-bleed={placement ? "" : undefined}
       {...(atFloor ? { [VIEWER_FLOOR_ATTRIBUTE]: "" } : {})}
       {...(fieldsKeepEscape ? { [VIEWER_FIELDS_KEEP_ESCAPE_ATTRIBUTE]: "" } : {})}
-      className={cn(
-        "group/viewer flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border outline-none",
-        // Grown from the edge it stands on. From its centre, as the inset
-        // card grows, the 2% it is short of at the start would lift its foot
-        // off the window's edge and show what is under it for the length of
-        // the entrance. `ViewerLayer` takes the padding out from under it.
-        placement && "origin-bottom rounded-b-none border-b-0",
-        // The card says once what colour it is, and is painted from that. A
-        // transcript shown in it (a previewed chat) fades and fills with the
-        // same `surface`, in either theme, wherever the card is placed.
-        "bg-surface [--surface:var(--color-background)] dark:[--surface:var(--color-card)]",
-        // Opens like the modal it effectively is: a touch small and faded,
-        // 200ms. It leaves at once: closing is you
-        // done with it, and a fade would hold it over the chat you went back to.
-        "transition-[opacity,scale] duration-200 ease-snappy starting:scale-[0.98] starting:opacity-0 motion-reduce:starting:scale-100",
-      )}
+      className={viewerCardClass(placement !== null, cardEnters)}
     >
       {/* pr-2 matches the gap-2 either side of a divider, so the close
           button sits centred between the last divider and the card's edge. */}
@@ -291,7 +381,7 @@ export function ViewerSurface({
           {floor ? null : <ViewerIconButton label="Close (Esc)" onClick={onClose}><X /></ViewerIconButton>}
         </div>
       </header>
-      <div ref={bodyRef} className={cn("min-h-0 flex-1 overflow-auto", bodyClassName)}>{children}</div>
+      <div ref={bodyRef} className={cn("min-h-0 flex-1 overflow-auto", bodyEnters && VIEWER_BODY_ENTER_CLASS, bodyClassName)}>{children}</div>
     </div>
   )
 }
