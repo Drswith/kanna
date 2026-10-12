@@ -10,6 +10,7 @@ import { useTerminalLayoutStore } from "../stores/terminalLayoutStore"
 import { getEditorPresetLabel, useTerminalPreferencesStore } from "../stores/terminalPreferencesStore"
 import { useEffectiveEditorPreset } from "../components/open-external-menu"
 import { useChatInputStore } from "../stores/chatInputStore"
+import { generateUUID } from "../lib/utils"
 import {
   findSidebarChat,
   getSidebarProjectGroups,
@@ -215,6 +216,12 @@ export interface KannaState {
   openSidebar: () => void
   collapseSidebar: () => void
   expandSidebar: () => void
+  /**
+   * The open chat is one this client started a moment ago and has not heard
+   * back about (`createChatForProject`). It is known to be empty, so its page
+   * is the new chat page without waiting to be told.
+   */
+  activeChatStarted: boolean
   handleCreateChat: (projectId: string) => Promise<void>
   handleForkChat: (chat: SidebarChatRow) => Promise<void>
   handleOpenLocalProject: (localPath: string) => Promise<void>
@@ -299,6 +306,17 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingLocalPath, setStartingLocalPath] = useState<string | null>(null)
   const [pendingChatId, setPendingChatId] = useState<string | null>(null)
+  // A chat this client has asked for and gone to without waiting to hear that
+  // it exists (`createChatForProject`). Until its snapshot comes this is all
+  // that is known of it: that it is empty, and which project it is in.
+  const [startedChat, setStartedChat] = useState<{ chatId: string; projectId: string } | null>(null)
+  // The ids of the ones whose `chat.create` is still in flight, for the chat
+  // subscription, which reads it outside a render.
+  const startingChatIdsRef = useRef(new Set<string>())
+  const activeChatIdRef = useRef(activeChatId)
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId
+  }, [activeChatId])
   const [optimisticUserPrompts, setOptimisticUserPrompts] = useState<OptimisticUserPrompt[]>([])
   const [optimisticProcessing, setOptimisticProcessing] = useState<OptimisticProcessingState | null>(null)
   const draftChatIds = useChatInputStore(useShallow((state) => Object.keys(state.drafts).sort()))
@@ -526,10 +544,16 @@ export function useKannaState(activeChatId: string | null): KannaState {
     // the span it holds gets a tail back instead of the whole window, which
     // otherwise lands as a second full render on top of the cached one. A read
     // slower than the cap subscribes without it and still paints if it can.
+    //
+    // A chat started a moment ago has no cache to wait on, on disk or
+    // anywhere. Its subscription goes out right behind its `chat.create`,
+    // and the server answers it once the chat is written.
     let diskWait: ReturnType<typeof setTimeout> | null = null
     const memory = readMemoryCachedWindow(chatId)
     if (memory) {
       subscribeToChat(memory)
+    } else if (startingChatIdsRef.current.has(chatId)) {
+      subscribeToChat(null)
     } else {
       diskWait = setTimeout(() => {
         diskWait = null
@@ -596,6 +620,8 @@ export function useKannaState(activeChatId: string | null): KannaState {
     if (pendingChatId === chatSnapshot.runtime.chatId) {
       setPendingChatId(null)
     }
+    // The server has spoken for the chat; from here it is drawn from that.
+    setStartedChat((current) => (current?.chatId === chatSnapshot.runtime.chatId ? null : current))
   }, [chatSnapshot, pendingChatId])
 
   // Mark a chat read when the user navigates *away* from it, not when it opens.
@@ -628,9 +654,22 @@ export function useKannaState(activeChatId: string | null): KannaState {
   } = useChatReadAnchor(socket, activeChatId, activeChatSnapshot?.readAnchor, chatReady)
 
   const sidebarProjectIdForChat = useProjectIdForChat(activeChatId)
+  const activeChatStarted = Boolean(activeChatId && startedChat?.chatId === activeChatId && !activeChatSnapshot)
+  // A started chat names its own project. `selectedProjectId` cannot stand in
+  // for it: the effect above sets that back to the project of the chat being
+  // left, whose snapshot is still held when the click is handled.
   const activeProjectId = activeChatSnapshot?.runtime.projectId
     ?? sidebarProjectIdForChat
+    ?? (activeChatStarted ? startedChat?.projectId : null)
     ?? selectedProjectId
+  // The open chat's project folder as the sidebar has it, for before the
+  // chat's snapshot says so. Without it a chat in any project but the first
+  // opened under the first one's path and changed to its own a beat later.
+  const activeProjectLocalPath = useSidebarStore((state) => (
+    activeChatId && activeProjectId
+      ? state.data.projectGroups.find((group) => group.groupKey === activeProjectId)?.localPath ?? null
+      : null
+  ))
   const chatDiffSnapshot = useMemo(() => {
     const currentDiffs = activeProjectId ? (projectDiffSnapshots[activeProjectId] ?? null) : null
     if (activeProjectId && currentDiffs) {
@@ -755,6 +794,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const firstProjectGroup = useFirstProjectGroup()
   const navbarLocalPath =
     runtime?.localPath
+    ?? activeProjectLocalPath
     ?? fallbackLocalProjectPath
     ?? firstProjectGroup.localPath
     ?? undefined
@@ -817,17 +857,59 @@ export function useKannaState(activeChatId: string | null): KannaState {
     })
   }, [optimisticScopeId, serverTranscriptEntries])
 
-  const createChatForProject = useCallback(async (projectId: string) => {
+  // Goes to the new chat's page at once and creates the chat behind it. The
+  // click used to wait on two trips to the server: `chat.create` before the
+  // navigation, then the new chat's first snapshot before the page could say
+  // it was empty. Each is a round trip, so through a tunnel the click did
+  // nothing for a few hundred milliseconds, and what was typed meanwhile went
+  // to the composer of the chat being left.
+  //
+  // The id is made here so the page has an address before the server answers
+  // (`chat.create` takes it), and `startedChat` is what the page is drawn from
+  // until the chat's snapshot arrives. Nothing else is assumed: the sidebar
+  // row comes with the server's push, as it always did.
+  const createChatForProject = useCallback((projectId: string) => {
     const chatPreferences = useChatPreferencesStore.getState()
     const sourceComposerState = activeChatId
       ? chatPreferences.getComposerState(activeChatId)
       : chatPreferences.getComposerState(NEW_CHAT_COMPOSER_ID)
-    const result = await socket.command<{ chatId: string }>({ type: "chat.create", projectId })
-    chatPreferences.initializeComposerForChat(result.chatId, { sourceState: sourceComposerState })
+    const chatId = generateUUID()
+    const cameFrom = `${window.location.pathname}${window.location.search}`
+    const sentAt = performance.now()
+    // Sent before the navigation, so it is on the wire ahead of everything the
+    // page sends about the chat: its subscription, a git refresh, a message
+    // typed and sent at once. The server holds those until the chat is
+    // written (`chatCreations` in ws-router), so none of them can find it
+    // missing.
+    const created = socket.command<{ chatId: string }>({ type: "chat.create", projectId, chatId }).then((result) => {
+      recordClientPerformance("chat_create_ack_ms", performance.now() - sentAt)
+      if (result.chatId === chatId) return
+      // A server from before it took an id made its own. Follow it there.
+      chatPreferences.initializeComposerForChat(result.chatId, { sourceState: sourceComposerState })
+      setStartedChat((current) => (current?.chatId === chatId ? { chatId: result.chatId, projectId } : current))
+      setPendingChatId((current) => (current === chatId ? result.chatId : current))
+      if (activeChatIdRef.current === chatId) navigate(`/chat/${result.chatId}`, { replace: true })
+    })
+    startingChatIdsRef.current.add(chatId)
+    chatPreferences.initializeComposerForChat(chatId, { sourceState: sourceComposerState })
     setSelectedProjectId(projectId)
-    setPendingChatId(result.chatId)
-    navigate(`/chat/${result.chatId}`)
+    setPendingChatId(chatId)
+    setStartedChat({ chatId, projectId })
+    navigate(`/chat/${chatId}`)
     setCommandError(null)
+    created.then(() => {
+      startingChatIdsRef.current.delete(chatId)
+    }, (error) => {
+      startingChatIdsRef.current.delete(chatId)
+      // The chat was not made, so its page comes down: the page the click was
+      // on takes its place in the history, with the reason. `pendingChatId`
+      // is left as it is. Clearing it would let the "unknown chat" bounce
+      // send this page to `/` before the navigation below has landed, and
+      // nothing is left in the history that could come back to this id.
+      setStartedChat((current) => (current?.chatId === chatId ? null : current))
+      if (activeChatIdRef.current === chatId) navigate(cameFrom, { replace: true })
+      setCommandError(error instanceof Error ? error.message : String(error))
+    })
   }, [activeChatId, navigate, socket])
 
   const resolveProjectIdForStartChat = useCallback(async (intent: StartChatIntent): Promise<{ projectId: string; localPath?: string }> => {
@@ -860,8 +942,17 @@ export function useKannaState(activeChatId: string | null): KannaState {
         setStartingLocalPath(localPath)
       }
 
-      const { projectId } = await resolveProjectIdForStartChat(intent)
-      await createChatForProject(projectId)
+      // A project that is already known is gone to in the same tick as the
+      // click, before anything is awaited. That includes one named by its
+      // folder (a card on the home page) when the sidebar lists that folder:
+      // `project.open` only hands back the id of a project that is there.
+      const knownProjectId = intent.kind === "project_id"
+        ? intent.projectId
+        : intent.kind === "local_path"
+          ? getSidebarProjectGroups().find((group) => group.localPath === intent.localPath)?.groupKey
+          : undefined
+      const projectId = knownProjectId ?? (await resolveProjectIdForStartChat(intent)).projectId
+      createChatForProject(projectId)
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : String(error))
       // Re-throw project requests so the command palette can show the
@@ -1169,6 +1260,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
     openSidebar,
     collapseSidebar,
     expandSidebar,
+    activeChatStarted,
     handleCreateChat,
     handleForkChat,
     handleOpenLocalProject,

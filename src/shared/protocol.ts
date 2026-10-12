@@ -213,8 +213,12 @@ export type ClientCommand =
       /** For `open_terminal`: which emulator. Omitted means this machine's default. */
       terminal?: TerminalPreset
     }
-  /** `delegator` makes the new chat a delegator. It can be made empty, to be sent to later. */
-  | { type: "chat.create"; projectId: string; delegator?: boolean }
+  /**
+   * `delegator` makes the new chat a delegator. It can be made empty, to be sent to later.
+   * `chatId` is the id the chat is to have, a UUID of the client's making: the
+   * web client goes to the chat's page as it sends this, not when it is acked.
+   */
+  | { type: "chat.create"; projectId: string; delegator?: boolean; chatId?: string }
   /** Makes an existing chat a delegator, or an ordinary chat again. */
   | { type: "chat.setDelegator"; chatId: string; delegator: boolean }
   | { type: "chat.fork"; chatId: string }

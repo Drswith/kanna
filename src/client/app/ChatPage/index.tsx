@@ -521,11 +521,17 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
   // sidebar knows has messages, though: that one is headed for a transcript,
   // and holding the empty state there left the new chat page's list over it
   // until the snapshot came.
+  //
+  // A chat started from this window a moment ago does not wait either. It is
+  // known to be empty, so its page is the new chat page from the click, until
+  // something is sent from it: that prompt shows before the snapshot can.
   const settledShowEmptyStateRef = useRef(false)
   const isChatLoading = Boolean(state.activeChatId && !state.runtime)
   const activeChatHasMessages = useSidebarChatHasMessages(state.activeChatId)
   const showEmptyState = isChatLoading
-    ? settledShowEmptyStateRef.current && !activeChatHasMessages
+    ? state.activeChatStarted
+      ? state.messages.length === 0
+      : settledShowEmptyStateRef.current && !activeChatHasMessages
     : state.messages.length === 0 && state.runtime?.title === "New Chat"
   settledShowEmptyStateRef.current = showEmptyState
   const projectId = state.activeProjectId
@@ -1048,7 +1054,10 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
   const appDialog = useAppDialog()
   const { delegate: composerDelegate, sendToDelegator } = useNewChatDelegate({
     // Not on a delegator's own empty page: what is typed there is for it.
-    enabled: showEmptyState && !graphView && !isChatLoading && !isDelegator,
+    // Nor on a page whose chat is still loading, where the empty state is
+    // only being held over from the last page. A chat started here is known
+    // to be empty, so the control is in the composer from its first frame.
+    enabled: showEmptyState && !graphView && (!isChatLoading || state.activeChatStarted) && !isDelegator,
     projectId,
     socket: state.socket,
     dialog: appDialog,

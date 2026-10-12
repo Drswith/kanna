@@ -70,7 +70,7 @@ export function createChatCommands({ store, agent, analytics }: ChatCommandsDeps
     async create(
       projectId: string,
       lineage?: ChatLineage,
-      options?: { delegator?: boolean },
+      options?: { delegator?: boolean; chatId?: string },
     ): Promise<ChatCommandOutcome<{ chatId: string }>> {
       const chat = await store.createChat(projectId, lineage, options)
       // The count is of chats people start.

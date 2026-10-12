@@ -53,6 +53,8 @@ const STALE_CHAT_AUTO_ARCHIVE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 /** Chats this much older than the user's latest activity are hard-deleted (archived or not). */
 const STALE_CHAT_DELETE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000
 const SIDEBAR_PROJECT_ORDER_FILE = "sidebar-order.json"
+/** What `crypto.randomUUID` makes, and all a client may name a chat (`createChat`). */
+const CLIENT_CHAT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const CHAT_MESSAGE_PREVIEW_MAX_LENGTH = 160
 /**
  * Ceiling on a chat's remembered touched paths. A long-running chat that
@@ -1432,13 +1434,21 @@ export class EventStore {
   async createChat(
     projectId: string,
     lineage?: { parentChatId?: string; createdByChatId?: string },
-    options?: { delegator?: boolean },
+    options?: { delegator?: boolean; chatId?: string },
   ) {
     const project = this.state.projectsById.get(projectId)
     if (!project || project.deletedAt) {
       throw new Error("Project not found")
     }
-    const chatId = crypto.randomUUID()
+    // The web client names a chat it starts, so it can be on the chat's page
+    // before this answers. The id becomes file names (the transcript, its
+    // payloads, its media folder), so nothing but a UUID is taken. A deleted
+    // chat still holds its id.
+    if (options?.chatId !== undefined) {
+      if (!CLIENT_CHAT_ID_PATTERN.test(options.chatId)) throw new Error("Invalid chat id")
+      if (this.state.chatsById.has(options.chatId)) throw new Error("Chat already exists")
+    }
+    const chatId = options?.chatId ?? crypto.randomUUID()
     const event: ChatEvent = {
       v: STORE_VERSION,
       type: "chat_created",

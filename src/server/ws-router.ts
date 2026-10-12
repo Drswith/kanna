@@ -260,6 +260,16 @@ export function createWsRouter({
   let pendingBroadcastTimer: ReturnType<typeof setTimeout> | null = null
   let pendingBroadcastAll = false
   const pendingBroadcastChatIds = new Set<string>()
+  // Chats being made under an id their client chose, until they are written.
+  // The web client is on such a chat's page as it sends `chat.create`, so what
+  // that page sends next (its subscription, a git refresh, a first message)
+  // can be handled while the create is still on its way to disk, and would
+  // find no such chat. Whatever names one of these ids waits for it instead.
+  const chatCreations = new Map<string, Promise<unknown>>()
+  async function chatCreated(chatId: string) {
+    // A create that failed leaves no chat, and the caller says so in its own words.
+    await chatCreations.get(chatId)?.catch(() => {})
+  }
   const resolvedAnalytics = analytics ?? NoopAnalyticsReporter
   const chatCommands = providedChatCommands ?? createChatCommands({ store, agent, analytics: resolvedAnalytics })
 
@@ -1242,6 +1252,9 @@ export function createWsRouter({
   async function handleCommand(ws: ServerWebSocket<ClientState>, message: Extract<ClientEnvelope, { type: "command" }>) {
     const { command, id } = message
     try {
+      if (command.type !== "chat.create" && "chatId" in command && typeof command.chatId === "string") {
+        await chatCreated(command.chatId)
+      }
       if ("chatId" in command && typeof command.chatId === "string" && store.prepareTranscript && store.getChat(command.chatId)) {
         if (["chat.getEntryDebugRaw", "chat.getToolEntries", "chat.loadOlder", "chat.getReadAnchor"].includes(command.type)) {
           await store.prepareTranscript(command.chatId)
@@ -1640,7 +1653,16 @@ export function createWsRouter({
         // The chat actions are defined in chat-commands.ts, where the agents'
         // tools reach them too. Only the ack and the push are done here.
         case "chat.create": {
-          await finishChatCommand(ws, id, await chatCommands.create(command.projectId, undefined, { delegator: command.delegator }))
+          const creation = chatCommands.create(command.projectId, undefined, { delegator: command.delegator, chatId: command.chatId })
+          if (command.chatId !== undefined) {
+            const requestedId = command.chatId
+            chatCreations.set(requestedId, creation)
+            const forget = () => {
+              if (chatCreations.get(requestedId) === creation) chatCreations.delete(requestedId)
+            }
+            creation.then(forget, forget)
+          }
+          await finishChatCommand(ws, id, await creation)
           return
         }
         case "chat.setDelegator": {
@@ -2104,6 +2126,12 @@ export function createWsRouter({
         ws.data.chatWindowChecks?.delete(parsed.id)
         ws.data.sidebarPatchBases?.delete(parsed.id)
         clearBackgroundChatPush(ws, parsed.id)
+        // After the subscription is on the books, so an unsubscribe that
+        // arrives during the wait finds it and takes it off.
+        if (parsed.topic.type === "chat" && chatCreations.has(parsed.topic.chatId)) {
+          await chatCreated(parsed.topic.chatId)
+          if (ws.data.subscriptions.get(parsed.id) !== parsed.topic) return
+        }
         if (parsed.topic.type === "chat" && store.prepareTranscript && store.getChat(parsed.topic.chatId)) {
           try {
             await store.prepareTranscript(parsed.topic.chatId)
