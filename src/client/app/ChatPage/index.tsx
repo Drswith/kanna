@@ -45,6 +45,7 @@ import { getChatViewer, openViewer, useChatViewer, useViewerStore, viewerWidthCl
 import type { ChatPreviewContext } from "./ChatPreview"
 import { useOpenChat } from "../useOpenChat"
 import { useNewChatDelegate } from "./useNewChatDelegate"
+import { useDelegateStore } from "../../stores/delegateStore"
 import { useAppDialog } from "../../components/ui/app-dialog"
 import type { DiffViewerContext } from "../../components/chat-ui/git/DiffViewer"
 import { useChatIsDelegator, useProjectRepoUrl, useSidebarChatHasMessages } from "../../stores/sidebarStore"
@@ -219,12 +220,6 @@ const VIEWER_PREVIEW_PANE_WIDTH_PX = 800
  * transcript column's own.
  */
 const VIEWER_CHAT_PANE_MIN_WIDTH_PX = 420
-/**
- * As narrow as a delegator's pane is dragged. It does not close (the list of
- * its chats is always there), so where another pane would shut it stops, at
- * a width its rows and a previewed chat's composer still read at.
- */
-const VIEWER_FLOOR_PANE_MIN_WIDTH_PX = 320
 const VIEWER_CHAT_PANE_MAX_WIDTH_PX = 800
 
 /** The chat pane never shrinks past this, so it also fixes the terminal's ceiling. */
@@ -559,7 +554,7 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
   const setViewerChat = useViewerStore((store) => store.setChat)
   const toggleViewerExpanded = useViewerStore((store) => store.toggleExpanded)
   const setViewerWidth = useViewerStore((store) => store.setWidth)
-  const closeViewerPane = useViewerStore((store) => store.closeAll)
+  const closeViewerPane = useViewerStore((store) => store.shut)
   // The viewer is the chat's: this chat's opens here, and another chat's
   // waits in the store for you to go back to it. Before paint, so a switch
   // never shows one frame of the last chat's viewer.
@@ -606,11 +601,17 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
   }, [state.chatSnapshot?.messages])
 
   const isMobileViewport = useIsMobileViewport()
-  // A delegator's pane rests on the list of the chats under it and never
-  // closes (`lib/viewer-levels`). Where there is a pane: on a phone the
-  // transcript is the page and the list is one button away, in the navbar.
-  // After `setViewerChat` above, in the same commit, so the page never paints
-  // a delegator with its pane shut.
+  // On a delegator the list of the chats under it is the floor of the pane:
+  // whatever is opened there sits over it, and Back returns to it
+  // (`lib/viewer-levels`). Where there is a pane: on a phone the transcript
+  // is the page and the list is the navbar button's overlay.
+  //
+  // The list is in the pane the first time a delegator's page is opened in
+  // this browser. After that the pane is as it was left, open or shut, like
+  // any chat's viewer, and the navbar's button brings it back.
+  //
+  // After `setViewerChat` above, in the same commit, so a delegator opened
+  // for the first time is never painted with its pane shut.
   const isDelegator = useChatIsDelegator(state.activeChatId)
   const viewerFloorChatId = isDelegator && !isMobileViewport ? state.activeChatId : null
   const setViewerFloor = useViewerStore((store) => store.setFloor)
@@ -619,7 +620,14 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     // delegator" is not known, and taking the floor away would shut a list
     // that a reload had just brought back, with its width.
     if (!state.sidebarReady) return
-    setViewerFloor(viewerFloorChatId ? { kind: "delegated", chatId: viewerFloorChatId } : null)
+    if (!viewerFloorChatId) {
+      setViewerFloor(null)
+      return
+    }
+    const delegateStore = useDelegateStore.getState()
+    const firstTime = !delegateStore.paneShown[viewerFloorChatId]
+    setViewerFloor({ kind: "delegated", chatId: viewerFloorChatId }, { openByDefault: firstTime })
+    if (firstTime) delegateStore.markPaneShown(viewerFloorChatId)
   }, [setViewerFloor, state.sidebarReady, viewerFloorChatId])
   const navigate = useNavigate()
   // The graph of a sub-chat is the graph of its top-most ancestor, so the
@@ -758,10 +766,10 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
   }, [chatTabsEnabled, handleCloseLastChatTab, handleOpenProjectFolder, handleRenameActiveChat, handleRenameChatTab, handleSelectChatTab, navbarBranchName, navbarTitleActions, navbarTitleText, renderChatTabHoverCard, state.activeChatId, state.editorLabel, state.handleCompose])
   // On a phone a delegator has no pane to keep its list in, so the list is a
   // button in the navbar instead, always there. Memoized for the navbar's memo.
-  const delegatedListChatId = isDelegator && isMobileViewport ? state.activeChatId : null
+  const delegatedListChatId = isDelegator ? state.activeChatId : null
   const navbarActions = useMemo(
-    () => (delegatedListChatId ? <DelegatedListButton chatId={delegatedListChatId} /> : null),
-    [delegatedListChatId],
+    () => (delegatedListChatId ? <DelegatedListButton chatId={delegatedListChatId} overlay={isMobileViewport} /> : null),
+    [delegatedListChatId, isMobileViewport],
   )
   const terminalLayout = useMemo(() => {
     const mainSizes = getEffectiveTerminalMainSizes(storedTerminalLayout.mainSizes, isMobileViewport)
@@ -1353,12 +1361,10 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     const viewerWidth = splitWidth * ((layout.viewerPane ?? 0) / 100)
     if (splitWidth <= 0) return
     // Dragged shut is shut: not back to the chat preview under what was open.
-    // A pane with a floor stops at its least width, which the panel holds
-    // it to; there is nothing for a drag to close.
-    if (viewerFloorChatId) setViewerWidth(Math.max(VIEWER_FLOOR_PANE_MIN_WIDTH_PX, Math.round(viewerWidth)))
-    else if (viewerWidth < VIEWER_PANE_CLOSE_WIDTH_PX) closeViewerPane()
+    // Dragged shut is shut: not back to what was under what was open.
+    if (viewerWidth < VIEWER_PANE_CLOSE_WIDTH_PX) closeViewerPane()
     else setViewerWidth(Math.round(viewerWidth))
-  }, [closeViewerPane, setViewerWidth, viewerDocked, viewerFloorChatId])
+  }, [closeViewerPane, setViewerWidth, viewerDocked])
 
   const chatCard = (
     <Card
@@ -1557,7 +1563,7 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
           // no width of its own), over the card.
           className={cn("z-40 w-4 -ml-1 -mr-3", !viewerDocked && "pointer-events-none opacity-0")}
         />
-        <ResizablePanel id="viewerPane" defaultSize="0%" minSize={viewerFloorChatId && viewerDocked ? VIEWER_FLOOR_PANE_MIN_WIDTH_PX : "0%"} className={cn("min-h-0 min-w-0", !viewerLayerExpanded && "relative")}>
+        <ResizablePanel id="viewerPane" defaultSize="0%" minSize="0%" className={cn("min-h-0 min-w-0", !viewerLayerExpanded && "relative")}>
           {viewerLayer}
         </ResizablePanel>
       </ResizablePanelGroup>

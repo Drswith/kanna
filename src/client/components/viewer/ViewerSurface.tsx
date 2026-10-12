@@ -1,7 +1,7 @@
 import { ArrowLeft, ChevronDown, ChevronUp, Maximize2, Minimize2, X } from "lucide-react"
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { FOCUS_FALLBACK_IGNORE_ATTRIBUTE } from "../../app/chatFocusPolicy"
-import { isEscapeClaimed, resolveEscapePress, VIEWER_FIELDS_KEEP_ESCAPE_ATTRIBUTE, VIEWER_FLOOR_ATTRIBUTE } from "../../lib/escape-key"
+import { isEscapeClaimed, resolveEscapePress, VIEWER_FIELDS_KEEP_ESCAPE_ATTRIBUTE } from "../../lib/escape-key"
 import { cn } from "../../lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 
@@ -31,9 +31,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
  * is not a composer, so Esc in vim in the terminal below is still vim's.
  *
  * Where the pane has a floor (a delegator's page: `ViewerFloorProvider`)
- * there is no Close. What is on the floor has no way out at all, and what is
- * over it has a Back arrow at the head of the card, which is also what Esc
- * does there: one level down, never out.
+ * what is over the floor has two ways out: a Back arrow at the head of the
+ * card, to the floor, and Close, which shuts the pane. Esc there is Back,
+ * one level at a time, so it shuts the pane only from the floor itself.
  *
  * j/k (or ]/[) step when there's more than one item, but never while you're
  * typing in a field. In a pane beside the chat they're the viewer's only
@@ -60,14 +60,16 @@ const ViewerPlacementContext = createContext<ViewerPlacement | null>(null)
 export const ViewerPlacementProvider = ViewerPlacementContext.Provider
 
 /**
- * The pane this card is in rests on a floor and does not close (see
+ * The pane this card is in has a floor under what is opened in it (see
  * `lib/viewer-levels`). `onBack` goes down one level, and is null for the
- * card that is the floor.
+ * card that is the floor. `onShut` closes the pane from any level: the
+ * card's Close, where `onClose` (what Escape does) would only step back.
  */
 export interface ViewerFloorState {
   onBack: (() => void) | null
   /** What Back returns to, for its label. */
   backLabel: string
+  onShut: () => void
 }
 
 const ViewerFloorContext = createContext<ViewerFloorState | null>(null)
@@ -178,6 +180,7 @@ export function ViewerSurface({
   label,
   scrollKey,
   scrollMemoryKey,
+  quietFocus = false,
   center,
   leading,
   fieldsKeepEscape = false,
@@ -217,6 +220,8 @@ export function ViewerSurface({
    * Kept for the life of the page.
    */
   scrollMemoryKey?: string
+  /** Does not take focus from something focused outside the pane when it mounts. See the focus effect. */
+  quietFocus?: boolean
 }) {
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
@@ -227,11 +232,6 @@ export function ViewerSurface({
   const motion = useContext(ViewerMotionContext)
   const [cardEnters] = useState(motion.cardEnters)
   const [bodyEnters] = useState(motion.bodyEnters)
-  // Resting on the floor: nothing for Escape to do here, so it goes on past
-  // this card to whatever is next in line for it (the composer's hold).
-  const atFloor = floor !== null && floor.onBack === null && !leading
-  const atFloorRef = useRef(atFloor)
-  atFloorRef.current = atFloor
   // The view's own Back (a previewed chat names what it goes back to), or
   // the pane's, for a view that has none of its own.
   const back = leading ?? (floor?.onBack ? (
@@ -262,13 +262,14 @@ export function ViewerSurface({
   }, [scrollMemoryKey])
 
   // Focus comes here on open, so its keys work at once and nothing behind
-  // (the composer, now inert) keeps it. Not for a pane's floor when focus is
-  // somewhere of its own: that card was not opened, it is part of the page
-  // (a delegator opens with its list already there), and the composer the
-  // page focused must keep what is typed next. Coming back down to the floor
-  // from something that had focus and is gone, it takes it like any card.
+  // (the composer, now inert) keeps it. A card that asks to be quiet about
+  // it leaves focus where it is when that is somewhere outside the pane: a
+  // delegator's list is there when its page opens, and the composer the
+  // page focused must keep what is typed next. Coming back to such a card
+  // from one that had focus and is gone, it takes it like any other.
+  const quietFocusRef = useRef(quietFocus)
   useEffect(() => {
-    if (atFloorRef.current) {
+    if (quietFocusRef.current) {
       const active = document.activeElement
       if (active && active !== document.body && !active.closest("[data-viewer-surface]")) return
     }
@@ -291,7 +292,7 @@ export function ViewerSurface({
       const action = resolveEscapePress({
         repeat: event.repeat,
         claimed: isEscapeClaimed(event),
-        pane: atFloorRef.current ? "floor" : "open",
+        paneOpen: true,
         canInterrupt: false,
       })
       if (action === "pass") return
@@ -336,7 +337,6 @@ export function ViewerSurface({
       // For what is shown in it, which keeps its last line clear of the
       // window's edge once the card no longer does (`VIEWER_END_PAD_CLASS`).
       data-bleed={placement ? "" : undefined}
-      {...(atFloor ? { [VIEWER_FLOOR_ATTRIBUTE]: "" } : {})}
       {...(fieldsKeepEscape ? { [VIEWER_FIELDS_KEEP_ESCAPE_ATTRIBUTE]: "" } : {})}
       className={viewerCardClass(placement !== null, cardEnters)}
     >
@@ -378,7 +378,8 @@ export function ViewerSurface({
               {placement.expanded ? <Minimize2 /> : <Maximize2 />}
             </ViewerIconButton>
           ) : null}
-          {floor ? null : <ViewerIconButton label="Close (Esc)" onClick={onClose}><X /></ViewerIconButton>}
+          {/* Esc is Back while there is one, so Close names the key only where it is what the key does. */}
+          <ViewerIconButton label={back && floor ? "Close" : "Close (Esc)"} onClick={floor ? floor.onShut : onClose}><X /></ViewerIconButton>
         </div>
       </header>
       <div ref={bodyRef} className={cn("min-h-0 flex-1 overflow-auto", bodyEnters && VIEWER_BODY_ENTER_CLASS, bodyClassName)}>{children}</div>

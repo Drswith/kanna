@@ -126,11 +126,12 @@ export const ChatPreview = memo(function ChatPreview({ item, context, onClose }:
 
   // What Back goes to, which the pane's levels say (`viewerLevelBelow`): the
   // chat this one was stepped to from, the graph or the delegator's list it
-  // was picked from, or the list a delegator's pane rests on. Nothing, for a
-  // chat opened from an ordinary chat's transcript, which has only a Close.
+  // was picked from, or the list under everything in a delegator's pane.
+  // Nothing, for a chat opened from an ordinary chat's transcript, which has
+  // only a Close.
   const floor = useViewerStore((store) => store.floor)
   const below = viewerLevelBelow({ item }, floor)
-  const backLabel = below === "closed" || below === "floor"
+  const backLabel = below === "closed"
     ? null
     : below.item.kind === "chat"
       ? (backThread ? `Back to ${backThread.title}` : "Back")

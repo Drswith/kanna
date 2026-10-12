@@ -250,7 +250,7 @@ export function VisualizationFullView({ artifact, onClose }: { artifact: Visuali
           // A key pressed in the frame is the frame's, and the card never
           // hears it. The frame hands Escape back when it has no use for it.
           onEscape={(repeat) => {
-            const action = resolveEscapePress({ repeat, claimed: hasOpenLayer(), pane: "open", canInterrupt: false })
+            const action = resolveEscapePress({ repeat, claimed: hasOpenLayer(), paneOpen: true, canInterrupt: false })
             if (action === "close-pane") onClose()
           }}
         />

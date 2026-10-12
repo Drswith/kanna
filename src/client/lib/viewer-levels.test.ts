@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { hasViewerLevelBelow, viewerLevelBelow, viewerPaneForEscape } from "./viewer-levels"
+import { hasViewerLevelBelow, viewerLevelBelow } from "./viewer-levels"
 
 const LIST = { kind: "delegated", chatId: "deleg" } as const
 const FILE = { kind: "file", projectId: "p1", path: "README.md" } as const
@@ -37,9 +37,9 @@ describe("viewerLevelBelow on an ordinary chat", () => {
 })
 
 describe("viewerLevelBelow on a delegator, whose pane has a floor", () => {
-  test("the list is the floor: nothing under it, and it does not close", () => {
-    expect(viewerLevelBelow({ item: LIST }, LIST)).toBe("floor")
-    expect(viewerLevelBelow({ item: LIST, widthPx: 500 }, LIST)).toBe("floor")
+  test("the list is the last thing in the pane: under it the pane is shut", () => {
+    expect(viewerLevelBelow({ item: LIST }, LIST)).toBe("closed")
+    expect(viewerLevelBelow({ item: LIST, widthPx: 500 }, LIST)).toBe("closed")
   })
 
   test("anything opened from the transcript goes back to the list", () => {
@@ -72,17 +72,5 @@ describe("hasViewerLevelBelow", () => {
     expect(hasViewerLevelBelow({ item: FILE }, LIST)).toBe(true)
     expect(hasViewerLevelBelow({ item: FILE }, null)).toBe(false)
     expect(hasViewerLevelBelow({ item: { kind: "chat", chatId: "b", back: ["a"] } }, null)).toBe(true)
-  })
-})
-
-describe("viewerPaneForEscape", () => {
-  test("no pane, a pane Escape can act on, and a pane resting on its floor", () => {
-    expect(viewerPaneForEscape(null, null)).toBe("none")
-    expect(viewerPaneForEscape(null, LIST)).toBe("none")
-    expect(viewerPaneForEscape({ item: FILE }, null)).toBe("open")
-    expect(viewerPaneForEscape({ item: FILE }, LIST)).toBe("open")
-    expect(viewerPaneForEscape({ item: LIST }, LIST)).toBe("floor")
-    // On a phone the list is an overlay like any other, and closes.
-    expect(viewerPaneForEscape({ item: LIST }, null)).toBe("open")
   })
 })

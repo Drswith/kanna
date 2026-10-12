@@ -10,12 +10,10 @@ import { CHAT_INPUT_ATTRIBUTE } from "../app/chatFocusPolicy"
  *      chat composer (a search box, the plan's edit box, a terminal).
  *   2. The viewer's pane, if it is open, closes. From anywhere, the main
  *      composer and a previewed chat's composer included, turn running or not.
- *      On a delegator's page, whose pane does not close, that is one step
- *      back toward the list it rests on (`lib/viewer-levels`).
+ *      On a delegator's page that is one level at a time: back to the list
+ *      of its chats from whatever is over it, then shut (`lib/viewer-levels`).
  *   3. Only with no pane open does Escape reach a running turn, and then it
- *      has to be held (`hold-to-confirm`): a press only starts the hold. A
- *      pane resting on its floor counts as no pane here: there is nothing in
- *      it for Escape to do, and a delegator's turn must still be stoppable.
+ *      has to be held (`hold-to-confirm`): a press only starts the hold.
  *
  * One press does one thing. The key repeats while it is held, and a repeat
  * never acts: the press that closed the pane cannot go on to start a hold,
@@ -36,24 +34,18 @@ export interface EscapePress {
   repeat: boolean
   /** Something nearer has a use for the key (step 1 above). */
   claimed: boolean
-  /**
-   * The viewer's pane: not on screen, on screen with something Escape closes
-   * or steps back from, or on screen and resting on its floor, where Escape
-   * has nothing to do to it.
-   */
-  pane: ViewerPaneForEscape
+  /** The viewer's pane is on screen. */
+  paneOpen: boolean
   /** Focus is in a chat composer whose chat has a turn running. */
   canInterrupt: boolean
 }
-
-export type ViewerPaneForEscape = "none" | "open" | "floor"
 
 export type EscapeAction =
   /** Not ours. Leave the event alone, for whoever claimed it or comes after. */
   | "pass"
   /** To swallow and do nothing with: a repeat of a press already spent. */
   | "ignore"
-  /** Close the pane, or step it back a level where it has a floor: whatever its Close does. */
+  /** Close the pane, or step it back a level where something is under it: whatever its Escape does. */
   | "close-pane"
   /** Begin the hold that interrupts the turn if it is kept up. */
   | "hold-to-interrupt"
@@ -61,7 +53,7 @@ export type EscapeAction =
 export function resolveEscapePress(press: EscapePress): EscapeAction {
   if (press.claimed) return "pass"
   if (press.repeat) return "ignore"
-  if (press.pane === "open") return "close-pane"
+  if (press.paneOpen) return "close-pane"
   if (press.canInterrupt) return "hold-to-interrupt"
   return "pass"
 }
@@ -109,19 +101,10 @@ export function isEscapeClaimed(event: Pick<KeyboardEvent, "isComposing" | "keyC
   return !viewer || viewer.hasAttribute(VIEWER_FIELDS_KEEP_ESCAPE_ATTRIBUTE)
 }
 
-/** Marks a viewer card that is its pane's floor: it does not close, and has nothing under it. */
-export const VIEWER_FLOOR_ATTRIBUTE = "data-viewer-floor"
-
-/**
- * What Escape finds in the viewer's pane, read off the cards on screen. One
- * that is leaving, or covered by another, is not counted.
- */
-export function readViewerPane(): ViewerPaneForEscape {
-  let pane: ViewerPaneForEscape = "none"
+/** Whether a viewer card is on screen and in use: not one that is leaving, or covered by another. */
+export function isViewerPaneOpen(): boolean {
   for (const surface of document.querySelectorAll("[data-viewer-surface]")) {
-    if (surface.closest("[inert]")) continue
-    if (!surface.hasAttribute(VIEWER_FLOOR_ATTRIBUTE)) return "open"
-    pane = "floor"
+    if (!surface.closest("[inert]")) return true
   }
-  return pane
+  return false
 }

@@ -17,9 +17,11 @@ type DelegatedItem = Extract<ViewerItem, { kind: "delegated" }>
 const AGE_TICK_MS = 60_000
 
 /**
- * The chats under a delegator, as a list to pick from: what the viewer's
- * pane holds on a delegator's page whenever nothing else is open in it (see
- * `lib/viewer-levels`), and what the navbar's button opens on a phone.
+ * The chats under a delegator, as a list to pick from. The navbar's button
+ * opens it, in the viewer's pane or, on a phone, over the transcript, and it
+ * is in the pane the first time a delegator's page is opened. It closes like
+ * anything else there. While the pane is open it is what everything opened
+ * on a delegator's page sits over (see `lib/viewer-levels`).
  *
  * It is the left sidebar's list, for one delegator: the same rows, the same
  * sections in the same order (Pinned, In Progress, Relevant, the dates,
@@ -82,6 +84,8 @@ export const DelegatedList = memo(function DelegatedList({ item, onClose }: {
       onClose={onClose}
       // Back from a chat is a new card: it opens where the list was left.
       scrollMemoryKey={`delegated:${item.chatId}`}
+      // There when a delegator's page opens, without having been asked for.
+      quietFocus
     >
       {/* The sidebar's own gutter, so the rows sit in the card as they sit in
           the sidebar. The card's end padding keeps the last one off the

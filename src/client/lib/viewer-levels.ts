@@ -10,9 +10,10 @@ import type { ViewerItem } from "../stores/viewerStore"
  * those are a stack, and this is its one reading.
  *
  * Under all of it, on a delegator's page, is the pane's floor: the list of
- * the chats under the delegator. The pane rests on it and cannot go lower,
- * which is what makes it a pane that does not close. An ordinary chat has no
- * floor, and the bottom of its stack is the pane shut.
+ * the chats under the delegator. Whatever is opened there, from the list or
+ * from the transcript, has the list under it, and Back returns to it. Under
+ * the list is the pane shut, as it is under everything on an ordinary chat:
+ * the floor is the last thing in the pane, not something that holds it open.
  *
  * Kept free of the store, for tests.
  */
@@ -27,10 +28,8 @@ export interface ViewerLevel {
 export type ViewerLevelBelow =
   /** What Back shows, and the pane width to show it at, when one is remembered. */
   | { item: ViewerItem; widthPx?: number }
-  /** Nothing is under it and nothing holds the pane open. */
+  /** Nothing is under it: one more step shuts the pane. */
   | "closed"
-  /** It is the floor. There is nowhere to go back to, and it does not close. */
-  | "floor"
 
 function sameItem(left: ViewerItem, right: ViewerItem) {
   return left.kind === "delegated" && right.kind === "delegated" && left.chatId === right.chatId
@@ -60,23 +59,11 @@ export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): 
     if (item.delegated) return { item: { kind: "delegated", chatId: item.delegated }, ...kept }
   }
 
-  if (!floor) return "closed"
-  if (sameItem(item, floor)) return "floor"
+  if (!floor || sameItem(item, floor)) return "closed"
   return { item: floor, ...kept }
 }
 
 /** Whether Back has somewhere to go: a level under this one that is not the pane shut. */
 export function hasViewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): boolean {
-  const below = viewerLevelBelow(level, floor)
-  return below !== "closed" && below !== "floor"
-}
-
-/**
- * What Escape finds in the pane (`resolveEscapePress`): something it can
- * close or step back from, or a pane resting on its floor, which it leaves
- * alone and goes on past.
- */
-export function viewerPaneForEscape(level: ViewerLevel | null, floor: ViewerItem | null): "none" | "open" | "floor" {
-  if (!level) return "none"
-  return viewerLevelBelow(level, floor) === "floor" ? "floor" : "open"
+  return viewerLevelBelow(level, floor) !== "closed"
 }

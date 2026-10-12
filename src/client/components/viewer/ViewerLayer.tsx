@@ -69,20 +69,21 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
   // Counted while mounted, shown or not: it is what tells `useOpenChat` that
   // a chat clicked on this page has a previewer to open in.
   const canShowChat = Boolean(chat)
-  // A pane with a floor (a delegator's page) does not close: what the views
-  // are handed as Close steps back a level there, and their card draws a
-  // Back arrow in place of the X (`ViewerSurface`). Not while leaving: by
-  // then the store is on the next thing, and this one's levels are not its.
+  // In a pane with a floor (a delegator's page) what the views are handed
+  // as Close is Escape's step back a level, and their card draws a Back
+  // arrow beside an X that shuts the pane (`ViewerSurface`).
   const floor = useViewerStore((store) => store.floor)
   const viewer = presented ? presented.viewer : live
   const stepBack = useViewerStore((store) => store.stepBack)
+  const shut = useViewerStore((store) => store.shut)
   const below = floor && viewer ? viewerLevelBelow(viewer, floor) : null
-  const hasBack = below !== null && below !== "floor" && below !== "closed"
+  const hasBack = below !== null && below !== "closed"
   const backKind = hasBack ? below.item.kind : null
   const floorState = useMemo<ViewerFloorState | null>(() => (floor ? {
     onBack: hasBack ? stepBack : null,
     backLabel: backKind === "chat" ? "Back to chat" : backKind === "graph" ? "Back to graph" : "Back to delegated chats",
-  } : null), [backKind, floor, hasBack, stepBack])
+    onShut: shut,
+  } : null), [backKind, floor, hasBack, shut, stepBack])
   useEffect(() => (canShowChat ? useViewerStore.getState().registerChatPreviewHost() : undefined), [canShowChat])
   // A page that previews chats will be asked for one, and for a delegator's
   // list: fetched ahead, in a quiet moment, so the first of each opens into

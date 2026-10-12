@@ -23,7 +23,7 @@ import { useShallow } from "zustand/react/shallow"
 import { useChatInputStore } from "../../stores/chatInputStore"
 import { NEW_CHAT_COMPOSER_ID, type ComposerState, useChatPreferencesStore } from "../../stores/chatPreferencesStore"
 import { CHAT_INPUT_ATTRIBUTE, focusNextChatInput, REQUEST_ATTACH_FILES_EVENT } from "../../app/chatFocusPolicy"
-import { isEscapeClaimed, readViewerPane, resolveEscapePress } from "../../lib/escape-key"
+import { isEscapeClaimed, isViewerPaneOpen, resolveEscapePress } from "../../lib/escape-key"
 import { HoldToStopHint, HoldToStopRing, useHoldToStop } from "./HoldToStop"
 import type { ComposerDelegate } from "./DelegateControl"
 import { delegatorDisplayTitle } from "../../lib/delegators"
@@ -1012,7 +1012,7 @@ const ChatInputInner = forwardRef<ChatInputHandle, Props>(function ChatInput({
       const action = resolveEscapePress({
         repeat: event.repeat,
         claimed: isEscapeClaimed(event.nativeEvent),
-        pane: readViewerPane(),
+        paneOpen: isViewerPaneOpen(),
         canInterrupt: Boolean(canCancel),
       })
       if (action === "hold-to-interrupt") {

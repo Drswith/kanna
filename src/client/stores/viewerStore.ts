@@ -55,8 +55,9 @@ export type ViewerItem =
   /**
    * The chats under the delegator `chatId`, as a list to pick from. On a
    * delegator's page this is the pane's floor (see `lib/viewer-levels`):
-   * always there, under whatever else is opened. On a phone, which has no
-   * pane, it is opened from the navbar and closes like anything else.
+   * under whatever else is opened there, and the last thing in the pane
+   * before it is shut. The navbar's button opens it, in the pane or, on a
+   * phone, over the transcript.
    */
   | { kind: "delegated"; chatId: string }
 
@@ -121,26 +122,36 @@ interface ViewerState {
    */
   changedByKey: boolean
   /**
-   * What the page's pane rests on and cannot close past, or null on a page
-   * whose pane closes: every page but a delegator's on a desktop.
+   * What is under everything else in the page's pane (`lib/viewer-levels`),
+   * or null on a page with nothing there: every page but a delegator's on a
+   * desktop, where it is the list of the delegator's chats.
    */
   floor: ViewerFloor | null
   setChat: (chatId: string | null) => void
   /**
-   * Called by the page, after `setChat`. Giving a floor puts it in an empty
-   * pane, so a delegator's pane is never shut.
+   * Called by the page, after `setChat`. `openByDefault` puts the floor in
+   * an empty pane: a delegator's list is there the first time its page is
+   * opened. After that the pane is as it was left, open or shut, like any
+   * chat's (the page remembers which, and passes false).
    */
-  setFloor: (floor: ViewerFloor | null) => void
+  setFloor: (floor: ViewerFloor | null, options?: { openByDefault?: boolean }) => void
   /** `expanded` opens it over the chat whatever the pane was, and only for as long as it is open. */
   open: (item: ViewerItem, options?: { expanded?: boolean }) => void
   /**
    * The Close button and Escape. Shuts the pane, or goes back to the chat
-   * that what is open was opened over. On a page with a floor it is Back:
-   * one level down, and nothing once the floor is reached.
+   * that what is open was opened over. On a page with a floor it is Escape
+   * only, and one level down: to the floor from what is over it, then shut.
+   * The Close button there is `shut`.
    */
   close: () => void
-  /** As far down as the pane goes in one step: shut, or to its floor. */
+  /**
+   * For content that is gone (the chat it previewed was deleted): as far
+   * down as that leaves something to show. Shut, or on a page with a floor,
+   * to the floor.
+   */
   closeAll: () => void
+  /** Shuts the pane, whatever is in it or under it: dragged shut, the Close button on a page with a floor, the navbar's toggle. */
+  shut: () => void
   /** The Back arrow: one level down (`viewerLevelBelow`), shutting the pane if that is what is under it. */
   stepBack: () => void
   setScrolledDiffPath: (path: string | null) => void
@@ -186,12 +197,12 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
   liveChatId: null,
   changedByKey: false,
   floor: null,
-  setFloor: (floor) => {
+  setFloor: (floor, options) => {
     const { chatKey } = get()
     if (get().floor?.chatId !== floor?.chatId) set({ floor })
     const current = currentViewer(chatKey)
     if (floor) {
-      if (!current) useRightSidebarStore.getState().setChatViewer(chatKey, { item: floor, expanded: false })
+      if (!current && options?.openByDefault) useRightSidebarStore.getState().setChatViewer(chatKey, { item: floor, expanded: false })
       return
     }
     // A list left in the pane with no floor under it: the window went to a
@@ -249,7 +260,6 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
       ...(widthPx !== undefined ? { widthPx } : {}),
     })
   },
-  // Dragged shut, or the chat it previewed is gone.
   closeAll: () => {
     const { chatKey, floor } = get()
     const current = currentViewer(chatKey)
@@ -257,13 +267,17 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
       ? { item: floor, expanded: current ? current.expandedBefore ?? current.expanded : false }
       : null)
   },
+  shut: () => {
+    set({ changedByKey: isKeyboardInitiated() })
+    useRightSidebarStore.getState().setChatViewer(get().chatKey, null)
+  },
   stepBack: () => {
     const { chatKey, floor } = get()
     const current = currentViewer(chatKey)
     if (!current) return
     const below = viewerLevelBelow(current, floor)
-    if (below === "floor") return
     if (below === "closed") {
+      set({ changedByKey: isKeyboardInitiated() })
       useRightSidebarStore.getState().setChatViewer(chatKey, null)
       return
     }
