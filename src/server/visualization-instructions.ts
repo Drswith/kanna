@@ -37,7 +37,7 @@ const corner = `${VISUALIZATION_EXPAND_BUTTON.clear}px`
 
 // Condensed from the prototype skill for the in-chat surface. URL persistence and
 // page-level picker placement need different rules inside an opaque, auto-sized iframe.
-const prototypeExample = `<div class="kanna-segmented" role="radiogroup" aria-label="Direction" style="margin-right:${corner}"><button role="radio" onclick="mount('Direct')">Direct</button><button role="radio" onclick="mount('Confirm')">Confirm</button></div>
+const prototypeExample = `<div class="kanna-picker"><div class="kanna-segmented" role="radiogroup" aria-label="Direction"><button role="radio" onclick="mount('Direct')">Direct</button><button role="radio" onclick="mount('Confirm')">Confirm</button></div></div>
 <section id="stage" style="height:40px"></section>
 <script>
 function mount(mode) {
@@ -78,7 +78,7 @@ const diagrams = [
 const prototypes = [
   "## Prototypes",
   "show_visualization is also an isolated, interactive surface for UI prototypes. When asked to explore a UI, scope one component or flow and read its product context and tokens. Default to 3 genuinely different directions (up to 5 when requested), each named for a distinct layout, density, personality, motion, or interaction model; color/copy-only variations do not count.",
-  `No title or subtitle: the stage is the design, and a heading above it reads as part of it. Put directions that need realistic size (a screen, a flow, anything with its own interactions) behind a kanna-segmented picker on its own row at the top, short of the clear corner, one direction on the stage at a time, in realistic surrounding context, with instant swaps. Put small things that are judged by eye (buttons, cards, icons, color or type options) side by side instead, each under its name. Give the stage one fixed height, the tallest direction's. Support touch/click and number/arrow keys; ignore shortcuts while editing inputs or holding modifiers. Keep the selection in memory: there is no URL, history or localStorage in the sandbox.`,
+  `No title or subtitle: the stage is the design, and a heading above it reads as part of it. Put directions that need realistic size (a screen, a flow, anything with its own interactions) behind a kanna-segmented picker on its own row at the top, centred in that row and not pushed to one side: wrap it in <div class=\"kanna-picker\">, which centres it and keeps it clear of the corner at any width. Tabs that switch a prototype's whole views (kanna-tabs) go in the same wrapper, centred too. One direction is on the stage at a time, in realistic surrounding context, with instant swaps. Put small things that are judged by eye (buttons, cards, icons, color or type options) side by side instead, each under its name. Give the stage one fixed height, the tallest direction's. Support touch/click and number/arrow keys; ignore shortcuts while editing inputs or holding modifiers. Keep the selection in memory: there is no URL, history or localStorage in the sandbox.`,
   "Every direction needs working local interactions, realistic copy, and explicit simulated backend/AI behavior where appropriate; do not imply a demo sends messages, generates real images, or saves production data. Cards, dialogs, and other surfaces being prototyped are allowed inside the otherwise unframed result. Prefer sub-300ms transform/opacity motion, ease-out entrances, and a replay control when useful.",
   "Keep exploration inside the visualization; do not change production code until the user chooses a direction. Explain each direction's benefit and cost, then wait for that choice. After explicit selection, integrate only the winner and remove temporary prototype source files unless asked to keep them.",
   `A two-direction picker, as small as it gets (an exploration normally has three):\n${prototypeExample}`,
@@ -98,7 +98,7 @@ export const SHOW_VISUALIZATION_DESCRIPTION = [
   "- Inline all CSS, JavaScript and data. Nothing external loads: no CDN script, stylesheet, font, image URL, fetch or storage.",
   "- One subject per visualization: one chart, one diagram, or one component's variants. Several questions are several visualizations.",
   `- Keep the top-right ${corner} by ${corner} clear; the host lays an expand button there.`,
-  "- A chart, table or diagram opens with an h3 title at the top left (charts add a p class=\"text-muted\" subtitle). A prototype has no heading: the stage is the design.",
+  "- A chart, table or diagram opens with an h3 title at the top left (charts add a p class=\"text-muted\" subtitle). A prototype has no heading; its version picker is centred (class=\"kanna-picker\" row).",
   "- Options and settings go on their own row above the content: class=\"kanna-segmented\" (role=radiogroup, buttons with role=radio and aria-checked) for a few exclusive options, class=\"kanna-tabs\" (role=tablist, role=tab, aria-selected) for whole views. Not custom button rows or <select>.",
   "- Colors are CSS variables, used directly: --foreground, --background, --muted-foreground, --border, --surface, --viz-red/green/blue/yellow/orange/purple/pink/teal, --chart-1 to --chart-8. Keep the page transparent: no outer card, border or page padding.",
   "- Body text is 16px, inherited. Only secondary labels go smaller, never under 12px.",

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Script, runInNewContext } from "node:vm"
 import { buildVisualizationDocument, VISUALIZATION_CONTENT_CSP } from "./visualization-document"
+import { VISUALIZATION_EXPAND_BUTTON } from "../shared/visualization"
 import { prepareVisualizationDocument, VISUALIZATION_BASE_SIZE_CSS, VISUALIZATION_HIDDEN_SCROLLBAR_CSS, VISUALIZATION_SHELL_FIT_CSS } from "../shared/visualization-host"
 
 async function parse(html: string) {
@@ -153,6 +154,9 @@ describe("visualization document isolation", () => {
     const inner = decode((await parse(buildVisualizationDocument('<p>Example</p>', 'Example', 360))).frames[0]!.srcdoc!)
     expect(inner).toContain(".kanna-segmented>:is([aria-checked=true],[aria-selected=true],[aria-pressed=true])")
     expect(inner).toContain(".kanna-tabs>:is([aria-selected=true],[aria-checked=true],[aria-pressed=true])")
+    // A prototype's version picker is centred, and stays out from under the expand button.
+    expect(inner).toContain(`.kanna-picker{display:flex;justify-content:center;padding:0 ${VISUALIZATION_EXPAND_BUTTON.clear}px`)
+    expect(inner).toContain(".kanna-picker>.kanna-tabs{flex:1;justify-content:center}")
     // The popover sits over the chart and is deaf to the pointer: showing it
     // moves nothing and cannot take the hover that shows it.
     const tooltip = /\.kanna-tooltip\{([^}]*)\}/.exec(inner)![1]!
