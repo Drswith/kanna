@@ -1301,6 +1301,7 @@ export function CommandPalette({ state }: { state: KannaState }) {
         const firstThread = projectChatSections
           ? [
             ...projectChatSections.pinned,
+            ...projectChatSections.delegators,
             ...projectChatSections.inProgress,
             ...projectChatSections.review,
             ...projectChatSections.relevant,
@@ -1411,6 +1412,7 @@ export function CommandPalette({ state }: { state: KannaState }) {
     const projectChatSectionThreads = projectChatSections
       ? [
         ...projectChatSections.pinned,
+        ...projectChatSections.delegators,
         ...projectChatSections.inProgress,
         ...projectChatSections.review,
         ...projectChatSections.relevant,

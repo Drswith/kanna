@@ -50,7 +50,10 @@ export interface ChannelSection {
  * Pinned holds the channels pinned in their own right (`pinnedAt`, kept by
  * the server with the project) and nothing else. A
  * pinned chat is not a pinned project: its pin is set aside here, and the chat
- * counts toward its project by status and age like any other.
+ * counts toward its project by status and age like any other. A delegator is
+ * set aside the same way. The Chats view gives delegators a section of their
+ * own, and this list has none: it lists projects, and a project is not a
+ * delegator for having one.
  *
  * Projects with no chat in any section (none yet, or all archived) trail in a
  * section of their own, folded: a channel list has to keep them reachable,
@@ -63,7 +66,9 @@ export function computeChannelSections(
   pendingSends?: PendingSendTimes,
 ): ChannelSection[] {
   const threads = listedThreads(flattenSidebarThreads({ projectGroups: [...projectGroups] })).map((thread) => (
-    thread.row.pinnedAt == null ? thread : { ...thread, row: { ...thread.row, pinnedAt: undefined } }
+    thread.row.pinnedAt == null && !thread.row.delegator
+      ? thread
+      : { ...thread, row: { ...thread.row, pinnedAt: undefined, delegator: undefined } }
   ))
   const sections = computeSidebarThreadSections(threads, nowMs, draftStartTimes, pendingSends)
   // Review folded into Relevant, as the Chats view shows it.
@@ -153,15 +158,13 @@ export interface ChannelPeekGroup {
 /**
  * The chats a channel's hover card offers: the ones you are most likely
  * hovering it to reach. That is the Chats view's sections down to Relevant,
- * in the Chats view's order (Pinned, In Progress, Relevant), and then one
- * group further: the project's most recent date bucket. A project with
- * nothing pressing therefore shows just its latest day of chats.
+ * in the Chats view's order (Pinned, Delegators, In Progress, Relevant), and
+ * then one group further: the project's most recent date bucket. A project
+ * with nothing pressing therefore shows just its latest day of chats.
  *
- * Above them all are the project's delegators, the chats that hand work to
- * the chats under them. A delegator is listed there and nowhere else: being
- * one outranks being pinned, in progress or relevant, so a pinned delegator
- * is under Delegators and not under Pinned as well. Pinned ones lead, in the
- * order they were pinned, and the rest follow by latest activity.
+ * Delegators are the Chats view's too (`computeSidebarThreadSections`): the
+ * project's delegators that are not pinned, whatever their state, and all of
+ * them, with no "Show more" to reach the rest.
  *
  * `all` is the card asked for the rest: every date bucket, in order.
  */
@@ -173,23 +176,13 @@ export function getChannelPeekGroups(
   all = false,
 ): ChannelPeekGroup[] {
   const threads = listedThreads(flattenSidebarThreads({ projectGroups: [group] }))
-  // Taken out before the sections are cut, so none of them can hold one.
-  // An archived chat is in no group here, delegator or not.
-  const isDelegator = (thread: SidebarThread) => Boolean(thread.row.delegator) && !thread.archived
-  const delegators = threads.filter(isDelegator).sort((left, right) => (
-    (left.row.pinnedAt ?? Infinity) - (right.row.pinnedAt ?? Infinity)
-    || right.lastActivityAt - left.lastActivityAt
-    || left.chatId.localeCompare(right.chatId)
-  ))
-  const sections = computeSidebarThreadSections(
-    threads.filter((thread) => !isDelegator(thread)), nowMs, draftStartTimes, pendingSends,
-  )
+  const sections = computeSidebarThreadSections(threads, nowMs, draftStartTimes, pendingSends)
   const buckets = all ? sections.buckets : sections.buckets.slice(0, 1)
   return [
-    { key: "delegators", label: "Delegators", threads: delegators },
     // This is the one place a channel's pinned chats show: the sidebar's
     // Pinned section is for pinned channels only.
     { key: "pinned", label: "Pinned", threads: sections.pinned },
+    { key: "delegators", label: "Delegators", threads: sections.delegators },
     { key: "in-progress", label: "In Progress", threads: sections.inProgress },
     { key: "relevant", label: "Relevant", threads: mergeRelevantThreads(sections, draftStartTimes) },
     ...buckets.map((bucket) => ({ key: bucket.key, label: bucket.label, threads: bucket.threads })),

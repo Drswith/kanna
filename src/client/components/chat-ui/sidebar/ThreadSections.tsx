@@ -195,9 +195,12 @@ function ThreadSectionsImpl({
     setSectionExpanded(key, !(expandOverrides[key] ?? defaultExpanded))
   }
 
+  // The sections that hold their chats whatever state those are in, then In
+  // Progress. The first two fold, and the fold is kept (`sidebarSectionStore`).
   const pinnedGroups = [
-    { key: "pinned", heading: "Pinned", threads: sections.pinned },
-    { key: "in-progress", heading: "In Progress", threads: sections.inProgress },
+    { key: "pinned", heading: "Pinned", threads: sections.pinned, collapsible: true },
+    { key: "delegators", heading: "Delegators", threads: sections.delegators, collapsible: true },
+    { key: "in-progress", heading: "In Progress", threads: sections.inProgress, collapsible: false },
   ].filter((group) => group.threads.length > 0)
 
   // Relevant counts here too: it drains chats out of the buckets, so a tab whose
@@ -236,7 +239,7 @@ function ThreadSectionsImpl({
   return (
     <div>
       {pinnedGroups.map((group) => {
-        const collapsible = group.key === "pinned"
+        const { collapsible } = group
         const isExpanded = !collapsible || (expandOverrides[group.key] ?? true)
         return (
           <div key={group.key}>

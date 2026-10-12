@@ -105,6 +105,23 @@ describe("computeChannelSections", () => {
     expect(sectionsOf([project("new", [chat("a", NOW)])])).toEqual([["Recent", ["new"]]])
   })
 
+  test("has no section for delegators: one counts toward its project by status and age, like any chat", () => {
+    expect(sectionsOf([
+      project("delegator-running", [chat("a", NOW - 30 * DAY, { delegator: true, status: "running" })]),
+      project("delegator-recent", [chat("b", NOW - DAY, { delegator: true })]),
+      project("delegator-old", [chat("c", NOW - 30 * DAY, { delegator: true })]),
+      project("delegator-unread", [chat("d", NOW - 30 * DAY, { delegator: true, unread: true })]),
+      // Nothing has been said in it yet, so the project has no chat to show.
+      project("delegator-empty", [chat("e", NOW, { delegator: true, lastMessageAt: undefined })]),
+    ])).toEqual([
+      ["In Progress", ["delegator-running"]],
+      ["Relevant", ["delegator-unread"]],
+      ["Recent", ["delegator-recent"]],
+      ["Older", ["delegator-old"]],
+      ["No Recent Chats", ["delegator-empty"]],
+    ])
+  })
+
   test("pins a project only when the channel itself is pinned", () => {
     expect(sectionsOf([
       project("has-pinned-chat", [chat("a", NOW, { pinnedAt: 5 })]),
@@ -155,7 +172,7 @@ describe("getChannelPeekGroups", () => {
     ])
   })
 
-  test("leads with the project's delegators, which are in no other group", () => {
+  test("lists the project's delegators under Pinned, and a pinned one under Pinned alone", () => {
     expect(peek([
       chat("pinned", NOW - 9 * DAY, { pinnedAt: 1 }),
       chat("running", NOW, { status: "running" }),
@@ -164,13 +181,15 @@ describe("getChannelPeekGroups", () => {
       chat("delegator-idle-old", NOW - 9 * DAY, { delegator: true }),
       chat("delegator-running", NOW - DAY, { delegator: true, status: "running" }),
       chat("delegator-unread", NOW - 2 * DAY, { delegator: true, unread: true }),
+      chat("delegator-empty", NOW - 3 * DAY, { delegator: true, lastMessageAt: undefined }),
+      // Pinned wins: these two are Pinned's, in the order they were pinned.
       chat("delegator-pinned-second", NOW - 5 * DAY, { delegator: true, pinnedAt: 7 }),
       chat("delegator-pinned-first", NOW - 30 * DAY, { delegator: true, pinnedAt: 3 }),
       chat("delegator-archived", NOW, { delegator: true }),
     ], ["delegator-archived"])).toEqual([
-      // Pinned ones in the order they were pinned, then the rest newest first.
-      ["Delegators", ["delegator-pinned-first", "delegator-pinned-second", "delegator-running", "delegator-unread", "delegator-idle-old"]],
-      ["Pinned", ["pinned"]],
+      ["Pinned", ["pinned", "delegator-pinned-first", "delegator-pinned-second"]],
+      // The rest, newest first, one with no message yet among them.
+      ["Delegators", ["delegator-running", "delegator-unread", "delegator-empty", "delegator-idle-old"]],
       ["In Progress", ["running"]],
       ["Today", ["today"]],
     ])
