@@ -137,6 +137,8 @@ interface Props {
    * node, so memoize it: this bar is.
    */
   titleSlot?: ReactNode
+  /** Sits just before the bar's own buttons: a delegator's list button, on a phone. */
+  actionsSlot?: ReactNode
   /**
    * Drops the branch name (or "Setup Git") from the right sidebar's button,
    * leaving its icon. For the tab bar, where every pixel of the bar is a
@@ -287,6 +289,7 @@ function ChatNavbarImpl({
   rightSidebarShortcut,
   branchName,
   titleSlot,
+  actionsSlot,
   hideBranchLabel = false,
   repoUrl,
   hasGitRepo = true,
@@ -383,6 +386,7 @@ function ChatNavbarImpl({
             a page with no chat to title. */}
         {titleSlot}
         <div className={cn("min-w-0 flex-1", titleSlot ? "md:hidden" : null)} />
+        {actionsSlot}
 
         {localPath && (onOpenExternal || onToggleEmbeddedTerminal || onToggleWidgets || onExportTranscript) ? (
           <div className="flex items-center gap-2 flex-shrink-0">

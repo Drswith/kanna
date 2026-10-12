@@ -1,0 +1,123 @@
+import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { Network, Workflow } from "lucide-react"
+import { useChatReferenceActions, useSidebarThread } from "../../components/chat-ui/chat-reference"
+import { SidebarChatHoverCard } from "../../components/chat-ui/sidebar/ChatHoverCard"
+import { ThreadSections } from "../../components/chat-ui/sidebar/ThreadSections"
+import { VIEWER_END_PAD_CLASS, ViewerIconButton, ViewerSurface } from "../../components/viewer/ViewerSurface"
+import { delegatedThreads } from "../../lib/delegators"
+import { cn } from "../../lib/utils"
+import { useSidebarStore } from "../../stores/sidebarStore"
+import { openViewer, useViewerStore, type ViewerItem } from "../../stores/viewerStore"
+import { useOpenChat } from "../useOpenChat"
+import { useStableSidebarThreads } from "../useStableSidebarThreads"
+
+type DelegatedItem = Extract<ViewerItem, { kind: "delegated" }>
+
+/** How often the rows' ages are brought up to date. They read to the minute. */
+const AGE_TICK_MS = 60_000
+
+/**
+ * The chats under a delegator, as a list to pick from: what the viewer's
+ * pane holds on a delegator's page whenever nothing else is open in it (see
+ * `lib/viewer-levels`), and what the navbar's button opens on a phone.
+ *
+ * It is the left sidebar's list, for one delegator: the same rows, the same
+ * sections in the same order (Pinned, In Progress, Relevant, the dates,
+ * Archived), the same hover card and right-click menu, by being the same
+ * components (`ThreadSections`). So a chat reads here as it reads there, and
+ * a change to either is a change to both. What differs is what a click does:
+ * the chat opens in this pane, over the list, and Back returns here.
+ *
+ * Which chats it holds is `delegatedThreads`: the ones directly under the
+ * delegator. The header keeps a way to the graph, which shows the whole tree.
+ */
+export const DelegatedList = memo(function DelegatedList({ item, onClose }: {
+  item: DelegatedItem
+  onClose: () => void
+}) {
+  const delegator = useSidebarThread(item.chatId)
+  const actions = useChatReferenceActions()
+  const openChat = useOpenChat()
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  const data = useSidebarStore((store) => store.data)
+  const allThreads = useStableSidebarThreads(data)
+  const threads = useMemo(() => delegatedThreads(allThreads, item.chatId), [allThreads, item.chatId])
+
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), AGE_TICK_MS)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  // A list for a chat that is not a delegator (it was made an ordinary chat
+  // again, or deleted) has nothing to be a list of. The floor is taken away
+  // by the page; this is for the phone's overlay and for a stored one.
+  const sidebarReady = useSidebarStore((store) => store.ready)
+  const stillDelegator = Boolean(delegator?.row.delegator)
+  useEffect(() => {
+    if (sidebarReady && !stillDelegator && useViewerStore.getState().floor === null) useViewerStore.getState().closeAll()
+  }, [sidebarReady, stillDelegator])
+
+  // Every way a row opens its chat is a click inside the pane: the chat
+  // takes the list's place and remembers the list as what it came from.
+  const card = useMemo(() => (actions ? {
+    ...actions.card,
+    onSelectChat: (chatId: string) => openChat(chatId, { from: "preview" }),
+    onSelectMessage: (chatId: string, role: "prompt" | "reply") => openChat(chatId, { from: "preview", jump: role }),
+    onOpenArchivedChat: (chatId: string) => openChat(chatId, { from: "preview" }),
+  } : null), [actions, openChat])
+
+  return (
+    <ViewerSurface
+      label={delegator ? `Chats under ${delegator.title}` : "Delegated chats"}
+      icon={<Workflow />}
+      title="Delegated"
+      subtitle={delegator?.title}
+      toolbar={(
+        <ViewerIconButton label="Show graph" onClick={() => openViewer({ kind: "graph", chatId: item.chatId })}>
+          <Network />
+        </ViewerIconButton>
+      )}
+      onClose={onClose}
+    >
+      {/* The sidebar's own gutter, so the rows sit in the card as they sit in
+          the sidebar. The card's end padding keeps the last one off the
+          window's edge where the card runs off it. */}
+      <div ref={containerRef} className={cn("px-[7px] pb-2", VIEWER_END_PAD_CLASS)}>
+        {threads.length === 0 || !actions || !card ? (
+          <p className="px-[10px] py-6 text-sm text-muted-foreground">
+            No chats yet. The ones this delegator starts or messages are listed here.
+          </p>
+        ) : (
+          <>
+            <ThreadSections
+              threads={threads}
+              activeChatId={null}
+              editorLabel={actions.editorLabel}
+              nowMs={nowMs}
+              // Kept apart per delegator, and from the sidebar's own.
+              expandScope={`delegated:${item.chatId}`}
+              detailScope="project-scoped"
+              onSelectChat={card.onSelectChat}
+              onOpenArchivedChat={card.onOpenArchivedChat}
+              onRestoreChat={actions.menu.onRestoreChat}
+              onCreateChat={actions.menu.onCreateChat}
+              onRenameChat={actions.menu.onRenameChat}
+              onShareChat={actions.menu.onShareChat}
+              onForkChat={actions.menu.onForkChat}
+              onToggleChatPin={actions.menu.onToggleChatPin ?? noop}
+              onArchiveChat={actions.menu.onArchiveChat}
+              onDeleteChat={actions.menu.onDeleteChat}
+              onCopyPath={actions.menu.onCopyPath}
+              onOpenExternalPath={actions.menu.onOpenExternalPath}
+            />
+            <SidebarChatHoverCard containerRef={containerRef} threads={threads} side="left" {...card} />
+          </>
+        )}
+      </div>
+    </ViewerSurface>
+  )
+})
+
+function noop() {}

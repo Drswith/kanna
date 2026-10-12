@@ -11,7 +11,7 @@ const IMAGE = { kind: "attachment", attachment: { url: "/media/a.png", name: "a.
 describe("viewerStore", () => {
   beforeEach(() => {
     useRightSidebarStore.setState({ size: DEFAULT_RIGHT_SIDEBAR_SIZE, projects: {}, projectUi: {}, chatViewers: {} })
-    useViewerStore.setState({ chatKey: "", openCount: 0, chatJump: null, liveChatId: null })
+    useViewerStore.setState({ chatKey: "", openCount: 0, chatJump: null, liveChatId: null, floor: null })
     useViewerStore.getState().setChat("chat-1")
   })
 
@@ -177,5 +177,93 @@ describe("viewerStore", () => {
     useViewerStore.getState().setChatJump("sub-1", "prompt")
     useViewerStore.getState().setChat("chat-2")
     expect(useViewerStore.getState().chatJump).toBeNull()
+  })
+
+  describe("on a delegator, whose pane has a floor", () => {
+    const LIST = { kind: "delegated", chatId: "chat-1" } as const
+
+    test("giving a floor fills an empty pane with it, and leaves an open one alone", () => {
+      useViewerStore.getState().setFloor(LIST)
+      expect(getChatViewer()).toEqual({ item: LIST, expanded: false })
+
+      openViewer(FILE)
+      useViewerStore.getState().setFloor(LIST)
+      expect(getChatViewer()?.item).toEqual(FILE)
+    })
+
+    test("close steps back one level and never past the floor", () => {
+      useViewerStore.getState().setFloor(LIST)
+      openViewer(CHAT)
+      openViewer({ kind: "chat", chatId: "sub-2", back: ["sub-1"] })
+      openViewer(IMAGE)
+
+      useViewerStore.getState().close()
+      expect(getChatViewer()?.item).toEqual({ kind: "chat", chatId: "sub-2", back: ["sub-1"] })
+      useViewerStore.getState().close()
+      expect(getChatViewer()?.item).toEqual(CHAT)
+      useViewerStore.getState().close()
+      expect(getChatViewer()?.item).toEqual(LIST)
+      useViewerStore.getState().close()
+      expect(getChatViewer()?.item).toEqual(LIST)
+    })
+
+    test("a file opened over the list goes back to the list at the list's width", () => {
+      useViewerStore.getState().setFloor(LIST)
+      useViewerStore.getState().setWidth(440)
+      openViewer(FILE)
+      expect(getChatViewer()?.widthPx).toBeUndefined()
+      useViewerStore.getState().close()
+      expect(getChatViewer()).toEqual({ item: LIST, expanded: false, widthPx: 440 })
+    })
+
+    test("a chat picked from the list keeps the pane's width both ways", () => {
+      useViewerStore.getState().setFloor(LIST)
+      useViewerStore.getState().setWidth(440)
+      openViewer({ kind: "chat", chatId: "sub-1", delegated: "chat-1" })
+      expect(getChatViewer()?.widthPx).toBe(440)
+      useViewerStore.getState().stepBack()
+      expect(getChatViewer()).toEqual({ item: LIST, expanded: false, widthPx: 440 })
+    })
+
+    test("closeAll goes down to the floor, not shut", () => {
+      useViewerStore.getState().setFloor(LIST)
+      openViewer(CHAT)
+      openViewer(IMAGE)
+      useViewerStore.getState().closeAll()
+      expect(getChatViewer()?.item).toEqual(LIST)
+    })
+
+    test("taking the floor away shuts a pane that held only it, and leaves anything else", () => {
+      useViewerStore.getState().setFloor(LIST)
+      useViewerStore.getState().setFloor(null)
+      expect(getChatViewer()).toBeNull()
+
+      useViewerStore.getState().setFloor(LIST)
+      openViewer(CHAT)
+      useViewerStore.getState().setFloor(null)
+      expect(getChatViewer()?.item).toEqual(CHAT)
+      // And with no floor, close shuts the pane again.
+      useViewerStore.getState().close()
+      expect(getChatViewer()).toBeNull()
+    })
+  })
+
+  describe("stepBack with no floor", () => {
+    test("goes back along a chat's trail and then shuts the pane", () => {
+      openViewer({ kind: "chat", chatId: "sub-2", back: ["sub-1"] })
+      useViewerStore.getState().stepBack()
+      expect(getChatViewer()?.item).toEqual(CHAT)
+      useViewerStore.getState().stepBack()
+      expect(getChatViewer()).toBeNull()
+    })
+
+    test("a chat picked from a delegator's list on a phone goes back to the list, which closes", () => {
+      openViewer({ kind: "delegated", chatId: "chat-1" })
+      openViewer({ kind: "chat", chatId: "sub-1", delegated: "chat-1" })
+      useViewerStore.getState().stepBack()
+      expect(getChatViewer()?.item).toEqual({ kind: "delegated", chatId: "chat-1" })
+      useViewerStore.getState().close()
+      expect(getChatViewer()).toBeNull()
+    })
   })
 })

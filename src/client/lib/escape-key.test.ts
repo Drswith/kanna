@@ -2,19 +2,19 @@ import { describe, expect, test } from "bun:test"
 import { resolveEscapePress, type EscapePress } from "./escape-key"
 
 function press(overrides: Partial<EscapePress>): EscapePress {
-  return { repeat: false, claimed: false, paneOpen: false, canInterrupt: false, ...overrides }
+  return { repeat: false, claimed: false, pane: "none", canInterrupt: false, ...overrides }
 }
 
 describe("resolveEscapePress", () => {
   test("something nearer the key keeps it, whatever else is true", () => {
     expect(resolveEscapePress(press({ claimed: true }))).toBe("pass")
-    expect(resolveEscapePress(press({ claimed: true, paneOpen: true, canInterrupt: true }))).toBe("pass")
-    expect(resolveEscapePress(press({ claimed: true, paneOpen: true, repeat: true }))).toBe("pass")
+    expect(resolveEscapePress(press({ claimed: true, pane: "open", canInterrupt: true }))).toBe("pass")
+    expect(resolveEscapePress(press({ claimed: true, pane: "open", repeat: true }))).toBe("pass")
   })
 
   test("an open pane closes, with or without a turn running", () => {
-    expect(resolveEscapePress(press({ paneOpen: true }))).toBe("close-pane")
-    expect(resolveEscapePress(press({ paneOpen: true, canInterrupt: true }))).toBe("close-pane")
+    expect(resolveEscapePress(press({ pane: "open" }))).toBe("close-pane")
+    expect(resolveEscapePress(press({ pane: "open", canInterrupt: true }))).toBe("close-pane")
   })
 
   test("with no pane, a running turn starts the hold", () => {
@@ -33,13 +33,25 @@ describe("resolveEscapePress", () => {
 
   test("a key still held never acts again", () => {
     // Over an open pane: one press closes one thing.
-    expect(resolveEscapePress(press({ paneOpen: true, repeat: true }))).toBe("ignore")
+    expect(resolveEscapePress(press({ pane: "open", repeat: true }))).toBe("ignore")
     // The press that closed the pane, still down once it is gone: no hold.
     expect(resolveEscapePress(press({ canInterrupt: true, repeat: true }))).toBe("ignore")
   })
 
+  test("a pane resting on its floor is passed over, as if it were not there", () => {
+    // A delegator's list: Escape in the composer reaches the running turn.
+    expect(resolveEscapePress(press({ pane: "floor", canInterrupt: true }))).toBe("hold-to-interrupt")
+    // And with no turn it is somebody else's, not a close.
+    expect(resolveEscapePress(press({ pane: "floor" }))).toBe("pass")
+    expect(resolveEscapePress(press({ pane: "floor", canInterrupt: true, repeat: true }))).toBe("ignore")
+  })
+
+  test("something open over the floor is stepped back from before any hold", () => {
+    expect(resolveEscapePress(press({ pane: "open", canInterrupt: true }))).toBe("close-pane")
+  })
+
   test("the press that closed a menu, still held, does not go on to the pane", () => {
-    expect(resolveEscapePress(press({ claimed: true, paneOpen: true }))).toBe("pass")
-    expect(resolveEscapePress(press({ paneOpen: true, repeat: true }))).toBe("ignore")
+    expect(resolveEscapePress(press({ claimed: true, pane: "open" }))).toBe("pass")
+    expect(resolveEscapePress(press({ pane: "open", repeat: true }))).toBe("ignore")
   })
 })

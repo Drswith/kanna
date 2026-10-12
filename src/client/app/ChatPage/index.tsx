@@ -6,6 +6,7 @@ import type { ChatInputHandle } from "../../components/chat-ui/ChatInput"
 import { ChatNavbar, ChatNavbarWash } from "../../components/chat-ui/ChatNavbar"
 import { ChatNavbarTitle } from "../../components/chat-ui/ChatNavbarTitle"
 import { ChatTabs } from "../../components/chat-ui/ChatTabs"
+import { DelegatedListButton } from "../../components/chat-ui/DelegatedListButton"
 import { SidebarChatHoverCard } from "../../components/chat-ui/sidebar/ChatHoverCard"
 import type { SidebarThread } from "../../lib/thread-sections"
 import type { ThreadRowMenuActions } from "../../components/chat-ui/sidebar/ThreadRow"
@@ -43,8 +44,10 @@ import { shouldOpenLocalFileLinkInEditor } from "../../lib/pathUtils"
 import { getChatViewer, openViewer, useChatViewer, useViewerStore, viewerWidthClass } from "../../stores/viewerStore"
 import type { ChatPreviewContext } from "./ChatPreview"
 import { useOpenChat } from "../useOpenChat"
+import { useNewChatDelegate } from "./useNewChatDelegate"
+import { useAppDialog } from "../../components/ui/app-dialog"
 import type { DiffViewerContext } from "../../components/chat-ui/git/DiffViewer"
-import { useProjectRepoUrl, useSidebarChatHasMessages } from "../../stores/sidebarStore"
+import { useChatIsDelegator, useProjectRepoUrl, useSidebarChatHasMessages } from "../../stores/sidebarStore"
 import { useAppSettingsStore } from "../../stores/appSettingsStore"
 import { DEFAULT_PROJECT_TERMINAL_LAYOUT, isTerminalVisible, useTerminalLayoutStore } from "../../stores/terminalLayoutStore"
 import { usePaneChatKey } from "../../lib/paneVisibility"
@@ -216,6 +219,12 @@ const VIEWER_PREVIEW_PANE_WIDTH_PX = 800
  * transcript column's own.
  */
 const VIEWER_CHAT_PANE_MIN_WIDTH_PX = 420
+/**
+ * As narrow as a delegator's pane is dragged. It does not close (the list of
+ * its chats is always there), so where another pane would shut it stops, at
+ * a width its rows and a previewed chat's composer still read at.
+ */
+const VIEWER_FLOOR_PANE_MIN_WIDTH_PX = 320
 const VIEWER_CHAT_PANE_MAX_WIDTH_PX = 800
 
 /** The chat pane never shrinks past this, so it also fixes the terminal's ceiling. */
@@ -597,6 +606,21 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
   }, [state.chatSnapshot?.messages])
 
   const isMobileViewport = useIsMobileViewport()
+  // A delegator's pane rests on the list of the chats under it and never
+  // closes (`lib/viewer-levels`). Where there is a pane: on a phone the
+  // transcript is the page and the list is one button away, in the navbar.
+  // After `setViewerChat` above, in the same commit, so the page never paints
+  // a delegator with its pane shut.
+  const isDelegator = useChatIsDelegator(state.activeChatId)
+  const viewerFloorChatId = isDelegator && !isMobileViewport ? state.activeChatId : null
+  const setViewerFloor = useViewerStore((store) => store.setFloor)
+  useLayoutEffect(() => {
+    // Not before the sidebar has said what the chat is: until then "not a
+    // delegator" is not known, and taking the floor away would shut a list
+    // that a reload had just brought back, with its width.
+    if (!state.sidebarReady) return
+    setViewerFloor(viewerFloorChatId ? { kind: "delegated", chatId: viewerFloorChatId } : null)
+  }, [setViewerFloor, state.sidebarReady, viewerFloorChatId])
   const navigate = useNavigate()
   // The graph of a sub-chat is the graph of its top-most ancestor, so the
   // URL is rewritten to name that chat. One tree then has one address, and
@@ -732,6 +756,13 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
       />
     )
   }, [chatTabsEnabled, handleCloseLastChatTab, handleOpenProjectFolder, handleRenameActiveChat, handleRenameChatTab, handleSelectChatTab, navbarBranchName, navbarTitleActions, navbarTitleText, renderChatTabHoverCard, state.activeChatId, state.editorLabel, state.handleCompose])
+  // On a phone a delegator has no pane to keep its list in, so the list is a
+  // button in the navbar instead, always there. Memoized for the navbar's memo.
+  const delegatedListChatId = isDelegator && isMobileViewport ? state.activeChatId : null
+  const navbarActions = useMemo(
+    () => (delegatedListChatId ? <DelegatedListButton chatId={delegatedListChatId} /> : null),
+    [delegatedListChatId],
+  )
   const terminalLayout = useMemo(() => {
     const mainSizes = getEffectiveTerminalMainSizes(storedTerminalLayout.mainSizes, isMobileViewport)
     return mainSizes === storedTerminalLayout.mainSizes ? storedTerminalLayout : { ...storedTerminalLayout, mainSizes }
@@ -1004,6 +1035,18 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     transcriptListRef.current?.scrollToEnd()
   }, [clearShowScrollTimeout])
 
+  // The new chat page can send to one of the project's delegators instead of
+  // starting a chat. Only there: a chat with messages sends to itself.
+  const appDialog = useAppDialog()
+  const { delegate: composerDelegate, sendToDelegator } = useNewChatDelegate({
+    // Not on a delegator's own empty page: what is typed there is for it.
+    enabled: showEmptyState && !graphView && !isChatLoading && !isDelegator,
+    projectId,
+    socket: state.socket,
+    dialog: appDialog,
+  })
+  const delegateTargetChatId = composerDelegate?.target?.chatId ?? null
+
   const handleChatSubmit = useCallback(async (
     content: string,
     options?: Parameters<typeof state.handleSend>[1],
@@ -1015,8 +1058,15 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     // (see `attachDelegationBlock`). It is attached here, where the view is
     // known, and from here on it is part of the message: sent, queued or
     // steered the same.
+    //
+    // From the new chat page with delegating on, the message is not for this
+    // chat at all: it goes to the delegator, and the app goes with it.
+    if (delegateTargetChatId) {
+      await sendToDelegator(delegateTargetChatId, content, options)
+      return
+    }
     await state.handleSend(graphView ? attachDelegationBlock(content) : content, options)
-  }, [graphView, state.handleSend])
+  }, [delegateTargetChatId, graphView, sendToDelegator, state.handleSend])
 
   const handleListSkills = useCallback(
     (provider: AgentProvider) =>
@@ -1303,9 +1353,12 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     const viewerWidth = splitWidth * ((layout.viewerPane ?? 0) / 100)
     if (splitWidth <= 0) return
     // Dragged shut is shut: not back to the chat preview under what was open.
-    if (viewerWidth < VIEWER_PANE_CLOSE_WIDTH_PX) closeViewerPane()
+    // A pane with a floor stops at its least width, which the panel holds
+    // it to; there is nothing for a drag to close.
+    if (viewerFloorChatId) setViewerWidth(Math.max(VIEWER_FLOOR_PANE_MIN_WIDTH_PX, Math.round(viewerWidth)))
+    else if (viewerWidth < VIEWER_PANE_CLOSE_WIDTH_PX) closeViewerPane()
     else setViewerWidth(Math.round(viewerWidth))
-  }, [closeViewerPane, setViewerWidth, viewerDocked])
+  }, [closeViewerPane, setViewerWidth, viewerDocked, viewerFloorChatId])
 
   const chatCard = (
     <Card
@@ -1412,6 +1465,7 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
         onCancel={handleCancel}
         onEditModels={handleEditModels}
         onListSkills={handleListSkills}
+        delegate={composerDelegate}
       />
       <DefaultModelsDialog
         open={defaultModelsDialogOpen}
@@ -1503,7 +1557,7 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
           // no width of its own), over the card.
           className={cn("z-40 w-4 -ml-1 -mr-3", !viewerDocked && "pointer-events-none opacity-0")}
         />
-        <ResizablePanel id="viewerPane" defaultSize="0%" minSize="0%" className={cn("min-h-0 min-w-0", !viewerLayerExpanded && "relative")}>
+        <ResizablePanel id="viewerPane" defaultSize="0%" minSize={viewerFloorChatId && viewerDocked ? VIEWER_FLOOR_PANE_MIN_WIDTH_PX : "0%"} className={cn("min-h-0 min-w-0", !viewerLayerExpanded && "relative")}>
           {viewerLayer}
         </ResizablePanel>
       </ResizablePanelGroup>
@@ -1652,6 +1706,7 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
       rightSidebarShortcut={resolvedKeybindings.bindings.toggleRightSidebar}
       branchName={state.chatDiffSnapshot?.branchName}
       titleSlot={navbarTitle}
+      actionsSlot={navbarActions}
       hideBranchLabel={chatTabsEnabled}
       repoUrl={activeProjectRepoUrl}
       hasGitRepo={state.chatDiffSnapshot?.status !== "no_repo"}

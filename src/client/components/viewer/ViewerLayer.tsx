@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type Ref } from "react"
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react"
 import { PANE_CLOSE_MS, prefersReducedMotion } from "../../app/paneAnimation"
 import type { ChatViewerState } from "../../stores/rightSidebarStore"
 import { isChatTrailItem, useChatViewer, useViewerStore, type ViewerItem } from "../../stores/viewerStore"
@@ -6,7 +6,8 @@ import type { DiffViewerContext } from "../chat-ui/git/DiffViewer"
 import type { ChatPreviewContext } from "../../app/ChatPage/ChatPreview"
 import { OpenLocalLinkProvider, type OpenLocalLinkTarget } from "../messages/shared"
 import { cn } from "../../lib/utils"
-import { ViewerPlacementProvider, type ViewerPlacement } from "./ViewerSurface"
+import { viewerLevelBelow } from "../../lib/viewer-levels"
+import { ViewerFloorProvider, ViewerPlacementProvider, type ViewerFloorState, type ViewerPlacement } from "./ViewerSurface"
 
 // Each view loads with its first use: the diff renderer (shiki grammars),
 // recharts and the markdown/table views are none of them first paint.
@@ -19,6 +20,7 @@ const FileViewer = lazy(() => import("./FileViewer").then((m) => ({ default: m.F
 // the export viewer mounts this layer too, and never shows a chat.
 const ChatPreview = lazy(() => import("../../app/ChatPage/ChatPreview").then((m) => ({ default: m.ChatPreview })))
 // React Flow comes with it, and only a page that can preview a chat shows one.
+const DelegatedList = lazy(() => import("../../app/ChatPage/DelegatedList").then((m) => ({ default: m.DelegatedList })))
 const GraphViewer = lazy(() => import("../../app/ChatGraph/GraphViewer").then((m) => ({ default: m.GraphViewer })))
 
 /**
@@ -66,6 +68,20 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
   // Counted while mounted, shown or not: it is what tells `useOpenChat` that
   // a chat clicked on this page has a previewer to open in.
   const canShowChat = Boolean(chat)
+  // A pane with a floor (a delegator's page) does not close: what the views
+  // are handed as Close steps back a level there, and their card draws a
+  // Back arrow in place of the X (`ViewerSurface`). Not while leaving: by
+  // then the store is on the next thing, and this one's levels are not its.
+  const floor = useViewerStore((store) => store.floor)
+  const viewer = presented ? presented.viewer : live
+  const stepBack = useViewerStore((store) => store.stepBack)
+  const below = floor && viewer ? viewerLevelBelow(viewer, floor) : null
+  const hasBack = below !== null && below !== "floor" && below !== "closed"
+  const backKind = hasBack ? below.item.kind : null
+  const floorState = useMemo<ViewerFloorState | null>(() => (floor ? {
+    onBack: hasBack ? stepBack : null,
+    backLabel: backKind === "chat" ? "Back to chat" : backKind === "graph" ? "Back to graph" : "Back to delegated chats",
+  } : null), [backKind, floor, hasBack, stepBack])
   useEffect(() => (canShowChat ? useViewerStore.getState().registerChatPreviewHost() : undefined), [canShowChat])
   if (!item || !showsOn(item, diff?.projectId) || (isChatTrailItem(item) && !chat)) return null
   // In a pane, the pane closes around it. Over the chat it leaves the way it
@@ -84,6 +100,7 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
       )}
     >
       <ViewerPlacementProvider value={placement ?? null}>
+      <ViewerFloorProvider value={floorState}>
       <OpenLocalLinkProvider onOpenLocalLink={onOpenLocalLink}>
         <Suspense fallback={null}>
           {item.kind === "diff" && diff ? (
@@ -109,9 +126,12 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
             <GraphViewer item={item} context={chat} onClose={close} />
           ) : item.kind === "chat" && chat ? (
             <ChatPreview item={item} context={chat} onClose={close} />
+          ) : item.kind === "delegated" ? (
+            <DelegatedList item={item} onClose={close} />
           ) : null}
         </Suspense>
       </OpenLocalLinkProvider>
+      </ViewerFloorProvider>
       </ViewerPlacementProvider>
     </div>
   )
