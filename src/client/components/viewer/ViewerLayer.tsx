@@ -38,7 +38,8 @@ function showsOn(item: ViewerItem | null, projectId: string | null | undefined) 
  * transcript, composer, terminal) when expanded or on a phone; the export
  * viewer over the whole page. It covers what it's placed in with the page
  * background, so nothing behind shows through, and sets the card 8px in, the
- * widget column's gutter.
+ * widget column's gutter. Not at the bottom where the page has a pane for
+ * it: there the card runs off the bottom edge (see `ViewerSurface`).
  *
  * `diff` is what the page knows about the working tree; a page without one
  * (the export viewer) never opens a diff or a project file. `onOpenLocalLink`
@@ -77,6 +78,7 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
       inert={exiting || undefined}
       className={cn(
         "absolute inset-0 z-30 bg-background p-2",
+        placement && "pb-0",
         overlayExit && "opacity-0 transition-opacity duration-150 ease-snappy motion-safe:[&_[data-viewer-surface]]:scale-[0.98]",
         className,
       )}

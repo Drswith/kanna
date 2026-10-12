@@ -12,6 +12,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
  * chat, and expands over the chat (navbar, transcript, composer) on
  * request; elsewhere it covers the page.
  *
+ * In a pane (docked or expanded) the card runs off the bottom of what it is
+ * placed in: square bottom corners, no bottom border, nothing under it. It
+ * is a sheet standing on the window's bottom edge, like the chat beside it,
+ * and not a card floating over it. So a composer docked at its bottom (a
+ * previewed chat's) sits at the height of the chat's own, where a card inset
+ * all round held it 9px higher: its 8px margin and its border. On a phone
+ * and in the export viewer it is an inset card with all four corners.
+ *
  * One header grammar: what it is (icon, title, a muted subtitle), then the
  * view's own controls, then stepping between items when there are several,
  * then expand and close. The body scrolls; the header stays.
@@ -27,6 +35,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
  * while focus is in it: the chat is live then, and a j typed there is the
  * chat's. Over the chat they're the viewer's from anywhere but a field.
  */
+
+/**
+ * Bottom padding for content that scrolls in the card and would otherwise end
+ * hard on the window's edge where the card runs off it: a file's last line,
+ * the last changed file. Nothing where the card is inset and has its own
+ * bottom edge. Not for content that fills the card (a chat, a graph, a
+ * table), which is meant to meet the edge.
+ */
+export const VIEWER_END_PAD_CLASS = "group-data-[bleed]/viewer:pb-4"
 
 /** The page gave the viewer a pane beside the chat, which it can widen over the chat. */
 export interface ViewerPlacement {
@@ -173,15 +190,23 @@ export function ViewerSurface({
       {...{ [FOCUS_FALLBACK_IGNORE_ATTRIBUTE]: "" }}
       data-state={docked ? undefined : "open"}
       data-viewer-surface
+      // For what is shown in it, which keeps its last line clear of the
+      // window's edge once the card no longer does (`VIEWER_END_PAD_CLASS`).
+      data-bleed={placement ? "" : undefined}
       {...(fieldsKeepEscape ? { [VIEWER_FIELDS_KEEP_ESCAPE_ATTRIBUTE]: "" } : {})}
       className={cn(
-        "flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border outline-none",
+        "group/viewer flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border outline-none",
+        // Grown from the edge it stands on. From its centre, as the inset
+        // card grows, the 2% it is short of at the start would lift its foot
+        // off the window's edge and show what is under it for the length of
+        // the entrance. `ViewerLayer` takes the padding out from under it.
+        placement && "origin-bottom rounded-b-none border-b-0",
         // The card says once what colour it is, and is painted from that. A
         // transcript shown in it (a previewed chat) fades and fills with the
         // same `surface`, in either theme, wherever the card is placed.
         "bg-surface [--surface:var(--color-background)] dark:[--surface:var(--color-card)]",
-        // Opens like the modal it effectively is: from its own centre, a
-        // touch small and faded, 200ms. It leaves at once: closing is you
+        // Opens like the modal it effectively is: a touch small and faded,
+        // 200ms. It leaves at once: closing is you
         // done with it, and a fade would hold it over the chat you went back to.
         "transition-[opacity,scale] duration-200 ease-snappy starting:scale-[0.98] starting:opacity-0 motion-reduce:starting:scale-100",
       )}
