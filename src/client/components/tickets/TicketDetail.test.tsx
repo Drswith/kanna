@@ -135,3 +135,21 @@ describe("a turn's rule", () => {
     expect(html).toMatch(/>11:10\s?AM</)
   })
 })
+
+describe("the activity's folded runs", () => {
+  const history: TicketDetail["history"] = [
+    { id: "f1", ticketId: "tk_000002", createdAt: at(12, 0), kind: "closed", by: "delegator" },
+    { id: "f2", ticketId: "tk_000002", createdAt: at(12, 1), kind: "reopened", cause: "manual", by: "delegator" },
+    { id: "f3", ticketId: "tk_000002", createdAt: at(12, 2), kind: "sent_to", chatId: "c1" },
+  ]
+  const html = renderToStaticMarkup(
+    <TicketActivity blocks={ticketActivityBlocks({ ...ticket, replies: [], history }, names)} chatTitle={names.chat} onOpenChat={() => {}} />,
+  )
+
+  test("draws a run as the transcript's folded line, closed, shimmering while its chat works", () => {
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain("1 close, 1 reopen, 1 hand-off")
+    expect(html).not.toContain("Closed by Main")
+    expect(html).toContain("kanna-shiny-track")
+  })
+})

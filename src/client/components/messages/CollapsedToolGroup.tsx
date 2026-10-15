@@ -6,14 +6,9 @@ import { MetaRow, MetaLabel } from "./shared"
 import { AnimatedShinyText } from "../ui/animated-shiny-text"
 import type { ProcessedToolCall } from "./types"
 import type { HydratedTranscriptMessage } from "../../../shared/types"
+import { foldedRunLabel, type FoldCategory } from "../../lib/fold-runs"
 
-interface ToolCategory {
-  key: string
-  singular: string
-  plural: string
-}
-
-const TOOL_CATEGORIES: Record<string, ToolCategory> = {
+const TOOL_CATEGORIES: Record<string, FoldCategory> = {
   read_file: { key: "read", singular: "read", plural: "reads" },
   edit_file: { key: "edit", singular: "edit", plural: "edits" },
   write_file: { key: "write", singular: "write", plural: "writes" },
@@ -27,34 +22,10 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   todo_write: { key: "todo", singular: "todo update", plural: "todo updates" },
 }
 
-const OTHER_CATEGORY: ToolCategory = { key: "other", singular: "tool call", plural: "tool calls" }
-
-function getToolCategory(toolKind: string): ToolCategory {
-  return TOOL_CATEGORIES[toolKind] ?? OTHER_CATEGORY
-}
+const OTHER_CATEGORY: FoldCategory = { key: "other", singular: "tool call", plural: "tool calls" }
 
 function getToolGroupLabel(messages: HydratedTranscriptMessage[]): string {
-  const counts = new Map<string, { category: ToolCategory; count: number }>()
-  const order: string[] = []
-
-  for (const msg of messages) {
-    const toolKind = (msg as ProcessedToolCall).toolKind
-    const category = getToolCategory(toolKind)
-
-    const existing = counts.get(category.key)
-    if (existing) {
-      existing.count++
-    } else {
-      counts.set(category.key, { category, count: 1 })
-      order.push(category.key)
-    }
-  }
-
-  // Format as "N reads, M writes" in order of first appearance
-  return order.map(key => {
-    const { category, count } = counts.get(key)!
-    return `${count} ${count === 1 ? category.singular : category.plural}`
-  }).join(", ")
+  return foldedRunLabel(messages, (msg) => TOOL_CATEGORIES[(msg as ProcessedToolCall).toolKind] ?? OTHER_CATEGORY)
 }
 
 interface Props {

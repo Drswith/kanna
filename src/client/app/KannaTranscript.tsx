@@ -21,6 +21,7 @@ import { CompactBoundaryMessage, ContextClearedMessage } from "../components/mes
 import { CompactSummaryMessage } from "../components/messages/CompactSummaryMessage"
 import { StatusMessage } from "../components/messages/StatusMessage"
 import { CollapsedToolGroup } from "../components/messages/CollapsedToolGroup"
+import { foldRuns } from "../lib/fold-runs"
 import { CHAT_SELECTION_ZONE_ATTRIBUTE } from "./chatFocusPolicy"
 import { SPECIAL_TOOL_NAMES } from "./derived"
 
@@ -329,42 +330,11 @@ export function buildTranscriptRenderItems(
   messages: HydratedTranscriptMessage[],
   renderStates: TranscriptMessageRenderState[]
 ): TranscriptRenderItem[] {
-  const result: TranscriptRenderItem[] = []
-  let index = 0
-
-  while (index < messages.length) {
-    const message = messages[index]
-    const renderState = renderStates[index]
-    if (renderState?.shouldRender && isCollapsibleToolCall(message)) {
-      const group: HydratedTranscriptMessage[] = [message]
-      const startIndex = index
-      index += 1
-
-      while (index < messages.length) {
-        const nextMessage = messages[index]
-        const nextRenderState = renderStates[index]
-        if (!nextRenderState?.shouldRender) {
-          index += 1
-          continue
-        }
-        if (!isCollapsibleToolCall(nextMessage)) break
-        group.push(nextMessage)
-        index += 1
-      }
-
-      if (group.length >= 2) {
-        result.push({ type: "tool-group", messages: group, startIndex })
-      } else {
-        result.push({ type: "single", message, index: startIndex })
-      }
-      continue
-    }
-
-    result.push({ type: "single", message, index })
-    index += 1
-  }
-
-  return result
+  return foldRuns(messages, isCollapsibleToolCall, (index) => renderStates[index]?.shouldRender === true).map((run) => (
+    run.type === "group"
+      ? { type: "tool-group", messages: run.items, startIndex: run.startIndex }
+      : { type: "single", message: run.item, index: run.index }
+  ))
 }
 
 /**

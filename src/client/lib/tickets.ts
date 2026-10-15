@@ -1,4 +1,5 @@
 import { CHAT_TOOL_NAMES } from "../../shared/tools"
+import { foldedRunLabel, foldRuns, type FoldCategory, type FoldedRun } from "./fold-runs"
 import type { AgentProvider, ChatAttachment, ModelOptions } from "../../shared/types"
 import {
   compareTicketsByActivity,
@@ -310,6 +311,38 @@ export function ticketActivityBlocks(
     for (const block of waiting) block.state = live.get(block.chatId) ?? (asked.has(block) ? "waiting_on_you" : "working")
   }
   return blocks
+}
+
+/**
+ * The activity's rows as the transcript folds its tool calls (`foldRuns`):
+ * hand-offs and events are the tool rows, and two or more in a row are one
+ * folded group; replies, like an agent's text, end a run. Same-chat
+ * hand-offs are already one block (`ticketActivityBlocks`), so a group never
+ * holds two rows for one piece of work.
+ */
+export function ticketActivityRows(blocks: readonly TicketActivityBlock[]): FoldedRun<TicketActivityBlock>[] {
+  return foldRuns(blocks, (block) => block.type === "handoff" || block.type === "event")
+}
+
+const HANDOFF_CATEGORY: FoldCategory = { key: "handoff", singular: "hand-off", plural: "hand-offs" }
+const EVENT_CATEGORIES: Record<TicketHistoryEvent["kind"], FoldCategory> = {
+  sent_to: HANDOFF_CATEGORY,
+  closed: { key: "closed", singular: "close", plural: "closes" },
+  reopened: { key: "reopened", singular: "reopen", plural: "reopens" },
+  renamed: { key: "renamed", singular: "rename", plural: "renames" },
+  chat_finished: { key: "report", singular: "report", plural: "reports" },
+  chat_failed: { key: "report", singular: "report", plural: "reports" },
+  chat_asking: { key: "report", singular: "report", plural: "reports" },
+}
+
+/** A folded group's line, as a tool group's: "1 close, 1 reopen, 2 hand-offs". */
+export function ticketActivityGroupLabel(blocks: readonly TicketActivityBlock[]): string {
+  return foldedRunLabel(blocks, (block) => (block.type === "event" ? EVENT_CATEGORIES[block.kind] : HANDOFF_CATEGORY))
+}
+
+/** Whether a group is still at work, as a tool group with a call in flight is: a chat in it is working. */
+export function ticketActivityGroupRunning(blocks: readonly TicketActivityBlock[]): boolean {
+  return blocks.some((block) => block.type === "handoff" && block.state === "working")
 }
 
 /**

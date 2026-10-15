@@ -6,13 +6,14 @@ import type { TicketDetail, TicketHistoryEvent } from "../../../shared/tickets"
 import type { AgentProvider, ChatAttachment, ChatSkillsSnapshot, ModelOptions, ProviderCatalogEntry } from "../../../shared/types"
 import { readVisualizationArtifact } from "../../../shared/visualization"
 import { FOCUS_FALLBACK_IGNORE_ATTRIBUTE } from "../../app/chatFocusPolicy"
-import { handoffStateLabel, ticketDraftKey, ticketRepliesLabel, type TicketActivityBlock } from "../../lib/tickets"
+import { handoffStateLabel, ticketActivityGroupLabel, ticketActivityGroupRunning, ticketActivityRows, ticketDraftKey, ticketRepliesLabel, type TicketActivityBlock } from "../../lib/tickets"
 import { cn } from "../../lib/utils"
 import { useChatReferenceActions, useSidebarThread } from "../chat-ui/chat-reference"
 import { chatOpenMenuItems } from "../chat-ui/ChatOpenMenuItems"
 import { ChatInput, type ChatInputHandle } from "../chat-ui/ChatInput"
 import { TEXT_LINE_SLOT_CLASS } from "../chat-ui/StatusMark"
 import { ThreadRowMenu } from "../chat-ui/sidebar/ThreadRow"
+import { CollapsedGroup } from "../messages/CollapsedToolGroup"
 import { AttachmentsCard } from "../messages/DisplayToolMessage"
 import { formatPromptBoundary, TimeBoundary } from "../messages/ResultMessage"
 import { MetaIconSlot, MetaLabel, MetaRow } from "../messages/shared"
@@ -180,31 +181,48 @@ function replyRows(block: Extract<TicketActivityBlock, { type: "user" | "delegat
 /**
  * The activity, as transcript rows (`ticketActivityBlocks`), each in a
  * transcript row's box and at the transcript's inset (its 12px, the row's
- * 8px), so the rhythm and the column are the chat's. New rows arrive as a
- * chat's do: in place, with no entrance of their own.
+ * 8px), so the rhythm and the column are the chat's. Hand-offs and events
+ * fold as tool calls do (`ticketActivityRows`): a run of them is one line,
+ * folded until opened, that shimmers while a chat in it works. New rows
+ * arrive as a chat's do: in place, with no entrance of their own.
  */
 export function TicketActivity({ blocks, chatTitle, onOpenChat }: {
   blocks: readonly TicketActivityBlock[]
   chatTitle: (chatId: string) => string
   onOpenChat: (chatId: string) => void
 }) {
+  // Keyed by a group's first row, which a growing run keeps, as the transcript's are.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const box = (key: string, node: ReactNode) => <div key={key} className={TRANSCRIPT_ROW_CLASS}>{node}</div>
+  const line = (block: Extract<TicketActivityBlock, { type: "handoff" | "event" }>) => {
+    if (block.type === "handoff") return <HandoffRow block={block} title={chatTitle(block.chatId)} onOpen={onOpenChat} />
+    const { chatId } = block
+    return <ActivityLine icon={eventIcon(block.kind)} label={block.text} onOpen={chatId ? () => onOpenChat(chatId) : undefined} />
+  }
   return (
     <div className="px-3 pb-2 pt-2">
-      {blocks.flatMap((block) => {
+      {ticketActivityRows(blocks).flatMap((row) => {
+        if (row.type === "group") {
+          const key = row.items[0]!.key
+          const lines = row.items.flatMap((block) => (block.type === "handoff" || block.type === "event" ? [block] : []))
+          return [box(key, (
+            <CollapsedGroup
+              label={ticketActivityGroupLabel(lines)}
+              loading={ticketActivityGroupRunning(lines)}
+              count={lines.length}
+              expanded={expanded[key] ?? false}
+              onExpandedChange={(next) => setExpanded((current) => ({ ...current, [key]: next }))}
+            >
+              {lines.map((block) => <div key={block.key}>{line(block)}</div>)}
+            </CollapsedGroup>
+          ))]
+        }
+        const block = row.item
         if (block.type === "divider") {
           return [box(block.key, <TimeBoundary label={formatPromptBoundary(new Date(block.at).toISOString())} />)]
         }
-        if (block.type === "handoff") {
-          return [box(block.key, <HandoffRow block={block} title={chatTitle(block.chatId)} onOpen={onOpenChat} />)]
-        }
-        if (block.type === "event") {
-          const { chatId } = block
-          return [box(block.key, (
-            <ActivityLine icon={eventIcon(block.kind)} label={block.text} onOpen={chatId ? () => onOpenChat(chatId) : undefined} />
-          ))]
-        }
-        return replyRows(block).map((row) => box(row.key, row.node))
+        if (block.type === "handoff" || block.type === "event") return [box(block.key, line(block))]
+        return replyRows(block).map((reply) => box(reply.key, reply.node))
       })}
     </div>
   )

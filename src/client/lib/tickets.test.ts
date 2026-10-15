@@ -4,6 +4,9 @@ import {
   adjacentTicketId,
   handoffStateLabel,
   ticketActivityBlocks,
+  ticketActivityGroupLabel,
+  ticketActivityGroupRunning,
+  ticketActivityRows,
   formatTicketNumbers,
   groupTicketBoard,
   handoffTicketOf,
@@ -406,6 +409,45 @@ describe("ticketActivityBlocks", () => {
     expect(blocks([], [reply(1, "user", "hi")]).map((block) => block.type)).toEqual(["user"])
     // Nor does the delegator's text: a rule dates the user's prompts only.
     expect(blocks([], [reply(1, "delegator", "hello"), reply(2, "delegator", "again")]).map((block) => block.type)).toEqual(["delegator", "delegator"])
+  })
+
+  describe("folded as the transcript folds tool calls", () => {
+    const rows = (list: ReturnType<typeof blocks>) => ticketActivityRows(list).map((row) => (row.type === "group" ? row.items.map((block) => block.type) : row.item.type))
+
+    test("two or more hand-offs and events in a row are one group, labelled by kind", () => {
+      const list = blocks([event(1, { kind: "closed", by: "user" }), event(2, { kind: "reopened", cause: "manual", by: "user" }), event(3, { kind: "sent_to", chatId: "a" })], [], [link("a", "working")])
+      const [group] = ticketActivityRows(list)
+      expect(group).toMatchObject({ type: "group", startIndex: 0 })
+      if (group?.type !== "group") throw new Error("not a group")
+      expect(ticketActivityGroupLabel(group.items)).toBe("1 close, 1 reopen, 1 hand-off")
+    })
+
+    test("a lone one stays a row", () => {
+      expect(rows(blocks([event(1, { kind: "sent_to", chatId: "a" })]))).toEqual(["handoff"])
+    })
+
+    test("a reply ends a run, as an agent's text ends a run of tool calls", () => {
+      const list = blocks(
+        [event(1, { kind: "sent_to", chatId: "a" }), event(2, { kind: "chat_finished", chatId: "a" }), event(5, { kind: "closed", by: "user" }), event(6, { kind: "renamed", from: "Old" })],
+        [reply(3, "delegator", "Done.")],
+      )
+      expect(rows(list)).toEqual(["handoff", "delegator", ["event", "event"]])
+    })
+
+    test("a group with a chat at work is running, as one with a call in flight is; settled, it is not", () => {
+      const run = [event(1, { kind: "reopened", cause: "chat_started", chatId: "a" }), event(2, { kind: "sent_to", chatId: "a" })]
+      expect(ticketActivityGroupRunning(blocks(run, [], [link("a", "working")]))).toBe(true)
+      expect(ticketActivityGroupRunning(blocks([...run, event(4, { kind: "chat_finished", chatId: "a" })], [], [link("a", "finished")]))).toBe(false)
+    })
+
+    test("same-chat hand-offs merge first, so a group never holds two rows for one piece of work", () => {
+      // The ticket in Jake's screenshot: closed, reopened, then two messages to one chat before its report.
+      const list = blocks([
+        event(1, { kind: "closed", by: "delegator" }), event(2, { kind: "reopened", cause: "manual", by: "delegator" }),
+        event(3, { kind: "sent_to", chatId: "a" }), event(5, { kind: "sent_to", chatId: "a" }), event(9, { kind: "chat_finished", chatId: "a" }),
+      ])
+      expect(rows(list)).toEqual([["event", "event", "handoff"]])
+    })
   })
 
   test("states read as words", () => {
