@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react"
+import { useRef, type ReactNode } from "react"
 import { ChevronRight } from "lucide-react"
 import type { TicketSummary } from "../../../shared/tickets"
 import { formatSidebarAgeLabel } from "../../lib/formatters"
-import { formatTicketFullTime, groupTicketBoard, ticketBoardColumns, ticketWantsUser } from "../../lib/tickets"
+import { formatTicketFullTime, groupTicketBoard, ticketBoardColumns, ticketWantsUser, type TicketBoardGroup } from "../../lib/tickets"
+import { useScrollMemory } from "../viewer/scroll-memory"
 import { cn } from "../../lib/utils"
 import { TicketMark } from "./TicketMark"
 
@@ -94,29 +95,48 @@ export function TicketRow({ ticket, nowMs, onOpen }: { ticket: TicketSummary; no
 }
 
 /**
- * The board as a list: Waiting on you, In progress, Done. Done holds its
- * unread tickets and a way to the rest. `otherChats` is the delegator's
- * chats no ticket links to, under a group of their own at the end.
+ * The board as a list, in its sections (`groupTicketBoard`): Waiting on you
+ * while it has tickets, In progress, Ready for review, Done, then the
+ * delegator's chats no ticket links to, under Other chats. In progress and
+ * Ready for review are always open: they are what is going on and what is
+ * news. Done folds like Other chats, folded until opened, and holds its 10
+ * latest and a way to the rest.
  */
-export function TicketBoardList({ tickets, nowMs, onOpenTicket, otherChats }: {
+export function TicketBoardList({ tickets, nowMs, onOpenTicket, otherChats, showAllDone, onShowAllDoneChange, doneExpanded, onDoneToggle }: {
   tickets: readonly TicketSummary[]
   nowMs: number
   onOpenTicket: (ticketId: string) => void
   /** `expanded` and `onToggle` fold the group: it is folded until opened. */
   otherChats?: { count: number; rows: ReactNode; expanded: boolean; onToggle: () => void } | null
+  /**
+   * Whether Done shows all of itself ("Show N more" pressed). Kept by the
+   * pane, not here: this list is a new one each time the board comes back
+   * from a ticket, and has to come back as it was left.
+   */
+  showAllDone: boolean
+  onShowAllDoneChange: (showAll: boolean) => void
+  /** Whether Done is open: kept by the pane with the other folds. */
+  doneExpanded: boolean
+  onDoneToggle: () => void
 }) {
-  const [showAllDone, setShowAllDone] = useState(false)
   const groups = groupTicketBoard(tickets, { showAllDone })
   return (
     <div className="pb-2">
-      {groups.map((group) => (
-        <section key={group.state} aria-label={group.label}>
-          <TicketGroupHeading label={group.label} count={group.total} />
-          {group.tickets.map((ticket) => <TicketRow key={ticket.id} ticket={ticket} nowMs={nowMs} onOpen={onOpenTicket} />)}
-          {group.state === "done" && (group.hidden > 0 || showAllDone) ? (
+      {groups.map((group) => {
+        const folds = group.section === "done"
+        const open = !folds || doneExpanded
+        return (
+        <section key={group.section} aria-label={group.label}>
+          <TicketGroupHeading
+            label={group.label}
+            count={group.total}
+            {...(folds ? { expanded: doneExpanded, onToggle: onDoneToggle } : {})}
+          />
+          {open ? group.tickets.map((ticket) => <TicketRow key={ticket.id} ticket={ticket} nowMs={nowMs} onOpen={onOpenTicket} />) : null}
+          {open && folds && (group.hidden > 0 || showAllDone) ? (
             <button
               type="button"
-              onClick={() => setShowAllDone((shown) => !shown)}
+              onClick={() => onShowAllDoneChange(!showAllDone)}
               // In line with the group's heading: its 6px margin and 10px of
               // padding put the words at the heading's 16px.
               className="mx-1.5 mb-1.5 w-[calc(100%-12px)] rounded-lg py-1.5 pl-2.5 pr-2.5 text-left text-[13px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-hover:text-foreground"
@@ -125,7 +145,8 @@ export function TicketBoardList({ tickets, nowMs, onOpenTicket, otherChats }: {
             </button>
           ) : null}
         </section>
-      ))}
+        )
+      })}
       {otherChats && otherChats.count > 0 ? (
         <section aria-label="Other chats">
           <TicketGroupHeading label="Other chats" count={otherChats.count} expanded={otherChats.expanded} onToggle={otherChats.onToggle} />
@@ -166,28 +187,54 @@ export function TicketCard({ ticket, nowMs, onOpen }: { ticket: TicketSummary; n
  * every column shown. Read Done tickets are here too: this is where the
  * whole board is looked at.
  */
-export function TicketBoardColumns({ tickets, nowMs, onOpenTicket }: {
+export function TicketBoardColumns({ tickets, nowMs, onOpenTicket, scrollKey }: {
   tickets: readonly TicketSummary[]
   nowMs: number
   onOpenTicket: (ticketId: string) => void
+  /**
+   * Names the board, so it comes back from a ticket scrolled as it was left:
+   * the row of columns across, and each column down, as each scrolls itself.
+   */
+  scrollKey?: string
 }) {
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  useScrollMemory(scrollKey && `${scrollKey}:columns`, gridRef)
+  const columns = ticketBoardColumns(tickets)
   return (
-    <div className="grid h-full min-h-0 grid-cols-[repeat(3,minmax(220px,1fr))] gap-3 overflow-auto p-3">
-      {ticketBoardColumns(tickets).map((column) => (
-        <section
-          key={column.state}
-          aria-label={column.label}
-          className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto rounded-xl bg-muted/45 p-2 scrollbar-hide"
-        >
-          <h3 className="mx-1.5 mb-0.5 mt-1 flex items-baseline gap-1.5 text-[13px] font-semibold">
-            {column.label}
-            <span className="font-normal tabular-nums text-muted-foreground">{column.total}</span>
-          </h3>
-          {column.tickets.length === 0
-            ? <p className="mx-1.5 text-xs text-muted-foreground">None</p>
-            : column.tickets.map((ticket) => <TicketCard key={ticket.id} ticket={ticket} nowMs={nowMs} onOpen={onOpenTicket} />)}
-        </section>
+    <div
+      ref={gridRef}
+      // Three columns, or four while Waiting on you has tickets.
+      style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(220px, 1fr))` }}
+      className="grid h-full min-h-0 gap-3 overflow-auto p-3"
+    >
+      {columns.map((column) => (
+        <TicketBoardColumn key={column.section} column={column} nowMs={nowMs} onOpenTicket={onOpenTicket} scrollKey={scrollKey && `${scrollKey}:${column.section}`} />
       ))}
     </div>
+  )
+}
+
+function TicketBoardColumn({ column, nowMs, onOpenTicket, scrollKey }: {
+  column: TicketBoardGroup
+  nowMs: number
+  onOpenTicket: (ticketId: string) => void
+  scrollKey?: string
+}) {
+  const ref = useRef<HTMLElement | null>(null)
+  useScrollMemory(scrollKey, ref)
+  return (
+    <section
+      ref={ref}
+      aria-label={column.label}
+      className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto rounded-xl bg-muted/45 p-2 scrollbar-hide"
+    >
+      <h3 className="mx-1.5 mb-0.5 mt-1 flex items-baseline gap-1.5 text-[13px] font-semibold">
+        {column.label}
+        <span className="font-normal tabular-nums text-muted-foreground">{column.total}</span>
+      </h3>
+      {column.tickets.length === 0
+        ? <p className="mx-1.5 text-xs text-muted-foreground">None</p>
+        : column.tickets.map((ticket) => <TicketCard key={ticket.id} ticket={ticket} nowMs={nowMs} onOpen={onOpenTicket} />)}
+    </section>
   )
 }

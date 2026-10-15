@@ -70,6 +70,10 @@ describe("Other chats", () => {
       nowMs={NOW}
       onOpenTicket={() => {}}
       otherChats={{ count: 2, rows: <span>an untracked chat</span>, expanded, onToggle: () => {} }}
+      showAllDone={false}
+      onShowAllDoneChange={() => {}}
+      doneExpanded={false}
+      onDoneToggle={() => {}}
     />,
   )
 
@@ -99,5 +103,48 @@ describe("ticket times on the board", () => {
       expect(html).toContain(">37m<")
       expect(html).toMatch(/title="[^"]*2026[^"]*"[^>]*>37m</)
     }
+  })
+})
+
+describe("the list's sections", () => {
+  const at = (minutes: number) => NOW - minutes * 60_000
+  const tickets: TicketSummary[] = [
+    { ...ticket, id: "tk_0000b1", number: 1, title: "Working one", state: "in_progress", updatedAt: at(5) },
+    { ...ticket, id: "tk_0000b2", number: 2, title: "Fresh one", state: "done", unread: true, updatedAt: at(10) },
+    { ...ticket, id: "tk_0000b3", number: 3, title: "Read one", state: "done", unread: false, updatedAt: at(20) },
+  ]
+  const list = (doneExpanded: boolean) => renderToStaticMarkup(
+    <TicketBoardList tickets={tickets} nowMs={NOW} onOpenTicket={() => {}} showAllDone={false} onShowAllDoneChange={() => {}} doneExpanded={doneExpanded} onDoneToggle={() => {}} />,
+  )
+  const section = (html: string, label: string) => {
+    const start = html.indexOf(`aria-label="${label}"`)
+    const end = html.indexOf("</section>", start)
+    return html.slice(start, end)
+  }
+
+  test("In progress and Ready for review are open, with no fold", () => {
+    const html = list(false)
+    expect(section(html, "In progress")).toContain(">Working one<")
+    expect(section(html, "In progress")).not.toContain("aria-expanded")
+    const review = section(html, "Ready for review")
+    expect(review).toContain(">Fresh one<")
+    expect(review).not.toContain("aria-expanded")
+    // Its rows keep the unread ping and the bold title.
+    expect(review).toContain("kanna-ping")
+    expect(review).toContain("font-semibold")
+  })
+
+  test("Done is folded until opened, with Other chats' chevron, and its rows keep the check", () => {
+    const folded = section(list(false), "Done")
+    expect(folded).toContain('aria-expanded="false"')
+    expect(folded).not.toContain(">Read one<")
+    const open = section(list(true), "Done")
+    expect(open).toContain('aria-expanded="true"')
+    expect(open).toContain(">Read one<")
+    expect(open).toContain("lucide-check")
+  })
+
+  test("Waiting on you is not there with nothing waiting", () => {
+    expect(list(true)).not.toContain('aria-label="Waiting on you"')
   })
 })

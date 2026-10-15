@@ -11,6 +11,10 @@ import { openViewer } from "../../stores/viewerStore"
 
 /** The key "Other chats" is folded under, in the board's list of sections. */
 const OTHER_CHATS_SECTION = "other-chats"
+/** And the key Done's "Show N more" is kept under, open or not. */
+const ALL_DONE_SECTION = "done-all"
+/** And Done's own fold: folded until opened, like Other chats. */
+const DONE_SECTION = "done"
 
 /**
  * A delegator's ticket board in the pane, where its list of chats was: what
@@ -39,6 +43,11 @@ export const TicketBoardPane = memo(function TicketBoardPane({ delegatorChatId, 
   // the sidebar's own sections are kept.
   const [sectionOverrides, setSectionExpanded] = useSectionOverrides(`delegated:${delegatorChatId}`)
   const othersExpanded = sectionOverrides[OTHER_CHATS_SECTION] ?? false
+  // Kept with the folds, for the same reason: the board is a new card each
+  // time it comes back from a ticket, and comes back as it was left, Done
+  // shown whole or not, and so scrolled where it was (`scrollMemoryKey`).
+  const showAllDone = sectionOverrides[ALL_DONE_SECTION] ?? false
+  const doneExpanded = sectionOverrides[DONE_SECTION] ?? false
   const openTicket = (ticketId: string) => openViewer({ kind: "ticket", chatId: delegatorChatId, ticketId })
 
   const others = useMemo(() => {
@@ -80,7 +89,7 @@ export const TicketBoardPane = memo(function TicketBoardPane({ delegatorChatId, 
           No tickets yet. Each piece of work this delegator hands out gets one here.
         </p>
       ) : expanded ? (
-        <TicketBoardColumns tickets={board.tickets} nowMs={nowMs} onOpenTicket={openTicket} />
+        <TicketBoardColumns tickets={board.tickets} nowMs={nowMs} onOpenTicket={openTicket} scrollKey={`tickets:${delegatorChatId}`} />
       ) : (
         <div className={VIEWER_END_PAD_CLASS}>
           <TicketBoardList
@@ -88,6 +97,10 @@ export const TicketBoardPane = memo(function TicketBoardPane({ delegatorChatId, 
             nowMs={nowMs}
             onOpenTicket={openTicket}
             otherChats={otherRows ? { count: others.length, rows: otherRows, expanded: othersExpanded, onToggle: () => setSectionExpanded(OTHER_CHATS_SECTION, !othersExpanded) } : null}
+            showAllDone={showAllDone}
+            onShowAllDoneChange={(showAll) => setSectionExpanded(ALL_DONE_SECTION, showAll)}
+            doneExpanded={doneExpanded}
+            onDoneToggle={() => setSectionExpanded(DONE_SECTION, !doneExpanded)}
           />
         </div>
       )}

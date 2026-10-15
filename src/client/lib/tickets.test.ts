@@ -51,35 +51,65 @@ describe("groupTicketBoard", () => {
     summary(5, "in_progress"),
     summary(6, "done"),
   ]
+  const sectionOf = (list: TicketSummary[], section: string) => groupTicketBoard(list).find((group) => group.section === section)
 
-  test("orders waiting on you, in progress, done, each latest first", () => {
+  test("goes Waiting on you, In progress, Ready for review, Done, each latest first", () => {
     const groups = groupTicketBoard(board)
-    expect(groups.map((group) => group.state)).toEqual(["waiting_on_you", "in_progress", "done"])
+    expect(groups.map((group) => group.section)).toEqual(["waiting_on_you", "in_progress", "review", "done"])
+    expect(groups.map((group) => group.label)).toEqual(["Waiting on you", "In progress", "Ready for review", "Done"])
     expect(groups[1]!.tickets.map((ticket) => ticket.number)).toEqual([5, 2])
   })
 
-  test("Done shows only its unread tickets, and counts the rest", () => {
-    const done = groupTicketBoard(board).find((group) => group.state === "done")!
-    expect(done.tickets.map((ticket) => ticket.number)).toEqual([3])
-    expect(done.total).toBe(3)
-    expect(done.hidden).toBe(2)
+  test("Ready for review is the unread Done tickets, and Done the read ones", () => {
+    expect(sectionOf(board, "review")!.tickets.map((ticket) => ticket.number)).toEqual([3])
+    expect(sectionOf(board, "done")!.tickets.map((ticket) => ticket.number)).toEqual([6, 1])
+  })
+
+  test("opening one in review reads it, and it moves to Done; marking it unread moves it back", () => {
+    const read = board.map((ticket) => (ticket.number === 3 ? { ...ticket, unread: false } : ticket))
+    expect(sectionOf(read, "review")).toBeUndefined()
+    expect(sectionOf(read, "done")!.tickets.map((ticket) => ticket.number)).toEqual([6, 3, 1])
+    const unread = read.map((ticket) => (ticket.number === 1 ? { ...ticket, unread: true } : ticket))
+    expect(sectionOf(unread, "review")!.tickets.map((ticket) => ticket.number)).toEqual([1])
+    expect(sectionOf(unread, "done")!.tickets.map((ticket) => ticket.number)).toEqual([6, 3])
+  })
+
+  test("Waiting on you is there only while it has tickets", () => {
+    expect(groupTicketBoard(board.filter((ticket) => ticket.state !== "waiting_on_you")).map((group) => group.section))
+      .toEqual(["in_progress", "review", "done"])
+  })
+
+  // Fourteen read Done tickets, 1 the oldest and 14 the latest.
+  const manyDone = Array.from({ length: 14 }, (_, index) => summary(index + 1, "done"))
+
+  test("Done shows its 10 latest and keeps the rest for Show more", () => {
+    const done = sectionOf(manyDone, "done")!
+    expect(done.tickets.map((ticket) => ticket.number)).toEqual([14, 13, 12, 11, 10, 9, 8, 7, 6, 5])
+    expect(done.total).toBe(14)
+    expect(done.hidden).toBe(4)
   })
 
   test("Show more shows every Done ticket", () => {
-    const done = groupTicketBoard(board, { showAllDone: true }).find((group) => group.state === "done")!
-    expect(done.tickets.map((ticket) => ticket.number)).toEqual([6, 3, 1])
+    const done = groupTicketBoard(manyDone, { showAllDone: true }).find((group) => group.section === "done")!
+    expect(done.tickets).toHaveLength(14)
     expect(done.hidden).toBe(0)
   })
 
-  test("leaves out empty groups, and keeps Done with nothing unread", () => {
-    const groups = groupTicketBoard([summary(1, "done"), summary(2, "in_progress")])
-    expect(groups.map((group) => group.state)).toEqual(["in_progress", "done"])
-    expect(groups[1]!.tickets).toEqual([])
-    expect(groups[1]!.hidden).toBe(1)
+  test("an unread one is never held back in Done: it is in Ready for review", () => {
+    const list = manyDone.map((ticket) => (ticket.number === 2 ? { ...ticket, unread: true } : ticket))
+    expect(sectionOf(list, "review")!.tickets.map((ticket) => ticket.number)).toEqual([2])
+    expect(sectionOf(list, "done")!.tickets).toHaveLength(10)
+    expect(sectionOf(list, "done")!.hidden).toBe(3)
   })
 
-  test("the full board keeps all three columns", () => {
-    expect(ticketBoardColumns([summary(1, "done")]).map((column) => column.total)).toEqual([0, 0, 1])
+  test("leaves out empty sections", () => {
+    expect(groupTicketBoard([summary(1, "done"), summary(2, "in_progress")]).map((group) => group.section)).toEqual(["in_progress", "done"])
+  })
+
+  test("the full board keeps In progress, Ready for review and Done, and has Waiting on you only while it has tickets", () => {
+    expect(ticketBoardColumns([summary(1, "done")]).map((column) => [column.section, column.total]))
+      .toEqual([["in_progress", 0], ["review", 0], ["done", 1]])
+    expect(ticketBoardColumns(board).map((column) => column.section)).toEqual(["waiting_on_you", "in_progress", "review", "done"])
   })
 })
 
@@ -243,15 +273,15 @@ describe("stepping between tickets", () => {
   const order = ticketStepOrder(board)
   const id = (number: number) => summary(number, "done").id
 
-  test("goes through the list's order, Done's hidden read tickets included", () => {
-    // Waiting on you, In progress latest first, then all of Done latest first.
-    expect(order).toEqual([4, 5, 2, 6, 3, 1].map(id))
+  test("goes through the list's sections in order, all of Done included", () => {
+    // Waiting on you, In progress latest first, Ready for review, then all of Done latest first.
+    expect(order).toEqual([4, 5, 2, 3, 6, 1].map(id))
   })
 
   test("steps across a group's edge", () => {
     expect(adjacentTicketId(order, id(4), "next")).toBe(id(5))
-    expect(adjacentTicketId(order, id(2), "next")).toBe(id(6))
-    expect(adjacentTicketId(order, id(6), "previous")).toBe(id(2))
+    expect(adjacentTicketId(order, id(2), "next")).toBe(id(3))
+    expect(adjacentTicketId(order, id(6), "previous")).toBe(id(3))
   })
 
   test("stops at the ends, and knows nothing of a ticket not on the board", () => {

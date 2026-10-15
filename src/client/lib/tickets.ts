@@ -11,7 +11,6 @@ import {
   type TicketDetail,
   type TicketHistoryEvent,
   type TicketReply,
-  type TicketState,
   type TicketSummary,
 } from "../../shared/tickets"
 
@@ -23,46 +22,68 @@ import {
  * every ticket's column, come from the server (`shared/tickets.ts`).
  */
 
-export const TICKET_STATE_LABELS: Record<TicketState, string> = {
+/**
+ * The board's sections, top to bottom in the pane and left to right
+ * expanded. Waiting on you first: it wants the user now, and the compass
+ * counts it. Then the work going on, then what is Done and not yet looked
+ * at (Ready for review: Done since the ticket was last opened), then the
+ * rest of Done. Opening a ticket in review reads it, and it moves to Done;
+ * Mark as unread moves it back.
+ */
+export type TicketBoardSection = "waiting_on_you" | "in_progress" | "review" | "done"
+
+export const TICKET_SECTION_LABELS: Record<TicketBoardSection, string> = {
   waiting_on_you: "Waiting on you",
   in_progress: "In progress",
+  review: "Ready for review",
   done: "Done",
 }
 
-/** Top to bottom in the pane, left to right expanded: what wants the user first. */
-const BOARD_ORDER: readonly TicketState[] = ["waiting_on_you", "in_progress", "done"]
+const SECTION_ORDER: readonly TicketBoardSection[] = ["waiting_on_you", "in_progress", "review", "done"]
+
+export function ticketSection(ticket: Pick<TicketSummary, "state" | "unread">): TicketBoardSection {
+  if (ticket.state === "done") return ticket.unread ? "review" : "done"
+  return ticket.state
+}
 
 export interface TicketBoardGroup {
-  state: TicketState
+  section: TicketBoardSection
   label: string
-  /** Every ticket in the column, for its count. */
+  /** Every ticket in the section, for its count. */
   total: number
   /** The ones the compact list shows. */
   tickets: TicketSummary[]
-  /** Read Done tickets behind "Show N more". */
+  /** Done's older tickets, behind "Show N more". */
   hidden: number
 }
 
+function sectionTickets(tickets: readonly TicketSummary[], section: TicketBoardSection): TicketSummary[] {
+  return tickets.filter((ticket) => ticketSection(ticket) === section).sort(compareTicketsByActivity)
+}
+
+/** How many of Done's latest the compact list shows before "Show N more". */
+export const RECENT_DONE_SHOWN = 10
+
 /**
- * The compact list's groups, empty ones left out, each latest activity first.
- * Done shows only its unread tickets until asked for the rest: a delegator's
- * read Done tickets are most of its board within a day, and they are the
- * ones nobody needs to see again.
+ * The compact list's sections, empty ones left out, each latest activity
+ * first. Done shows its 10 latest and keeps the rest for "Show N more": a
+ * delegator's Done is most of its board within a day. Done is read tickets
+ * only, the unread ones being in Ready for review, so nothing in it is news.
  */
 export function groupTicketBoard(tickets: readonly TicketSummary[], { showAllDone = false } = {}): TicketBoardGroup[] {
-  return BOARD_ORDER.flatMap((state) => {
-    const column = tickets.filter((ticket) => ticket.state === state).sort(compareTicketsByActivity)
-    if (column.length === 0) return []
-    const shown = state === "done" && !showAllDone ? column.filter((ticket) => ticket.unread) : column
-    return [{ state, label: TICKET_STATE_LABELS[state], total: column.length, tickets: shown, hidden: column.length - shown.length }]
+  return SECTION_ORDER.flatMap((section) => {
+    const list = sectionTickets(tickets, section)
+    if (list.length === 0) return []
+    const shown = section === "done" && !showAllDone ? list.slice(0, RECENT_DONE_SHOWN) : list
+    return [{ section, label: TICKET_SECTION_LABELS[section], total: list.length, tickets: shown, hidden: list.length - shown.length }]
   })
 }
 
 /**
  * Every ticket, in the order stepping goes through them from an open one
- * (the ↑ and ↓ in its header, k and j): the list's, top to bottom, with
- * Done's read tickets in it too, as "Show N more" shows them, so a step
- * reaches each one. The delegator's other chats are not tickets, and are not in it.
+ * (the ↑ and ↓ in its header, k and j): the list's sections, top to
+ * bottom, with all of Done in it, folded or behind "Show N more" or not, so
+ * a step reaches each one. The delegator's other chats are not tickets, and are not in it.
  */
 export function ticketStepOrder(tickets: readonly TicketSummary[]): string[] {
   return groupTicketBoard(tickets, { showAllDone: true }).flatMap((group) => group.tickets.map((ticket) => ticket.id))
@@ -75,11 +96,18 @@ export function adjacentTicketId(order: readonly string[], ticketId: string, dir
   return order[index + (direction === "next" ? 1 : -1)] ?? null
 }
 
-/** The full board's columns: all three, empty or not, so they hold their places. */
+/**
+ * The full board's columns: the same sections, all of each. In progress,
+ * Ready for review and Done hold their places, empty or not, so the board
+ * does not shift as tickets move. Waiting on you is a column only while it
+ * has tickets: it is the exception, and an empty column for it would be a
+ * quarter of the board standing for nothing.
+ */
 export function ticketBoardColumns(tickets: readonly TicketSummary[]): TicketBoardGroup[] {
-  return BOARD_ORDER.map((state) => {
-    const column = tickets.filter((ticket) => ticket.state === state).sort(compareTicketsByActivity)
-    return { state, label: TICKET_STATE_LABELS[state], total: column.length, tickets: column, hidden: 0 }
+  return SECTION_ORDER.flatMap((section) => {
+    const list = sectionTickets(tickets, section)
+    if (section === "waiting_on_you" && list.length === 0) return []
+    return [{ section, label: TICKET_SECTION_LABELS[section], total: list.length, tickets: list, hidden: 0 }]
   })
 }
 
