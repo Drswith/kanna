@@ -6,6 +6,28 @@
    (macos/src/native-window.ts), so the sidebar can sit under the
    traffic lights with corners concentric to the window's. */
 @custom-variant mac-app (&:where(.kanna-mac-app, .kanna-mac-app *));
+/* Hover for a pointer that hovers precisely. Tailwind's own `hover:` is
+   `(hover: hover)` alone, which some touch screens with a stylus report. */
+@custom-variant pointer-hover {
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      @slot;
+    }
+  }
+}
+/* Inside a widget row (WidgetRow, group/row) whose ••• is showing: the row
+   is hovered, holds keyboard focus, or has its menu open. Hover only where
+   the device hovers, or a tap's sticky :hover would hide the time on touch. */
+@custom-variant row-revealed {
+  @media (hover: hover) {
+    &:where(.group\/row:hover *) {
+      @slot;
+    }
+  }
+  &:where(.group\/row:focus-visible *, .group\/row:has(:focus-visible) *, .group\/row[data-state="open"] *) {
+    @slot;
+  }
+}
 
 @font-face {
   font-family: "Body";
