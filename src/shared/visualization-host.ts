@@ -1,3 +1,5 @@
+import { VISUALIZATION_CONTROLS_CSS, VISUALIZATION_CONTROLS_SCRIPT } from "./visualization-controls"
+
 export interface VisualizationTheme {
   appearance: "light" | "dark"
   variables: Record<string, string>
@@ -25,6 +27,20 @@ export const VISUALIZATION_SHELL_FIT_CSS = "#visualization{max-height:100vh}"
 const escapeAttribute = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
 const decodeAttribute = (value: string) => value.replaceAll("&quot;", '"').replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&")
 
+/**
+ * The controls script goes in right after the document's content policy,
+ * ahead of the saved bootstrap and of any older copy of itself: the first
+ * copy to run is the only one, and this is the newest.
+ */
+const CONTENT_POLICY = /<meta http-equiv="Content-Security-Policy"[^>]*>/
+const withControlsScript = (inner: string) => {
+  const script = `<script>${VISUALIZATION_CONTROLS_SCRIPT}</script>`
+  const policy = CONTENT_POLICY.exec(inner)
+  if (!policy) return inner.replace("</head>", `${script}</head>`)
+  const at = policy.index + policy[0].length
+  return inner.slice(0, at) + script + inner.slice(at)
+}
+
 /** Adapt immutable saved shells at load time, including ones made before the host
  * forwarded fonts and appearance. Only the generated shell and its escaped srcdoc
  * are touched; authored markup stays inside the same opaque-origin sandbox. */
@@ -34,7 +50,7 @@ export function prepareVisualizationDocument(html: string, theme: VisualizationT
     .map(([key, value]) => `${key}:${value}`).join(";")
   // Documents saved while the base size was 14px carry it in their own
   // stylesheet. This sits after that and before anything authored.
-  const css = `${fontCss}:root{color-scheme:${theme.appearance};${variables}}html{-webkit-font-smoothing:antialiased}${VISUALIZATION_BASE_SIZE_CSS}${VISUALIZATION_HIDDEN_SCROLLBAR_CSS}`
+  const css = `${fontCss}:root{color-scheme:${theme.appearance};${variables}}html{-webkit-font-smoothing:antialiased}${VISUALIZATION_BASE_SIZE_CSS}${VISUALIZATION_HIDDEN_SCROLLBAR_CSS}${VISUALIZATION_CONTROLS_CSS}`
   // A key pressed in the frame never reaches the page around it. Escape is
   // the page's way out of a pane, so one the visualization has no use for is
   // passed up. Heard last, so the page's own handlers answer it first.
@@ -42,7 +58,7 @@ export function prepareVisualizationDocument(html: string, theme: VisualizationT
     if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing) parent.postMessage({type:'kanna:escape', repeat:event.repeat}, '*');
   });</script>`
   const prepared = html.replace(/\bsrcdoc="([^"]*)"/, (_, source: string) => {
-    const inner = decodeAttribute(source).replace("</head>", `<style>${css}</style>${escape}</head>`)
+    const inner = withControlsScript(decodeAttribute(source).replace("</head>", `<style>${css}</style>${escape}</head>`))
     return `srcdoc="${escapeAttribute(inner)}"`
   })
   // Browsers paint an opaque canvas when an iframe and its document disagree on
