@@ -21,12 +21,14 @@ function openTicket(delegatorChatId: string, ticketId: string) {
   openViewer({ kind: "ticket", chatId: delegatorChatId, ticketId })
 }
 
-export function TicketHandoffCard({ ticket, chatId, verb }: {
+export function TicketHandoffCard({ ticket, chatId, verb, reopened = false }: {
   ticket: TicketSummary
   /** The chat this hand-off reached. */
   chatId: string | null
   /** What the call did: "Sent to", "Forked to". */
   verb: string
+  /** The hand-off took the ticket back out of Done. */
+  reopened?: boolean
 }) {
   const thread = useSidebarThread(chatId)
   const link = handoffChat(ticket, chatId)
@@ -34,6 +36,8 @@ export function TicketHandoffCard({ ticket, chatId, verb }: {
   const classes = toolCardClasses(false)
   const target = thread?.title ?? link?.title ?? "a chat"
   const open = () => openTicket(ticket.delegatorChatId, ticket.id)
+  // Said, since a reopen is meant for a defect in what was delivered: a new ask should have been a new ticket.
+  const sent = reopened ? `Reopened, ${verb.toLowerCase()} ${target}` : `${verb} ${target}`
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return
     event.preventDefault()
@@ -43,7 +47,7 @@ export function TicketHandoffCard({ ticket, chatId, verb }: {
     <div
       role="button"
       tabIndex={0}
-      aria-label={`Ticket #${ticket.number} ${ticket.title}: ${verb} ${target}, ${ticketShortState(ticket)}. Open the ticket`}
+      aria-label={`Ticket #${ticket.number} ${ticket.title}: ${sent}, ${ticketShortState(ticket)}. Open the ticket`}
       onClick={open}
       onKeyDown={onKeyDown}
       className={cn(
@@ -60,7 +64,7 @@ export function TicketHandoffCard({ ticket, chatId, verb }: {
         <span className="min-w-0 truncate">{ticket.title}</span>
         <span className="ml-auto shrink-0 pl-3 text-xs tabular-nums text-muted-foreground">{formatTicketTime(ticket.updatedAt, now)}</span>
       </div>
-      <p className={TOOL_CARD_CAPTION_CLASS}>{verb} {target} · {ticketShortState(ticket)}</p>
+      <p className={TOOL_CARD_CAPTION_CLASS}>{sent} · {ticketShortState(ticket)}</p>
     </div>
   )
 }
@@ -70,12 +74,13 @@ export function TicketHandoffCard({ ticket, chatId, verb }: {
  * transcript: one slim line, in the look of a report's ("X replied"), with
  * the ticket's glyph, rather than the same card a second time.
  */
-export function TicketAlsoSentLine({ delegatorChatId, ticketId, number, chatId, fallbackTitle }: {
+export function TicketAlsoSentLine({ delegatorChatId, ticketId, number, chatId, fallbackTitle, reopened = false }: {
   delegatorChatId: string
   ticketId: string
   number: number | null
   chatId: string | null
   fallbackTitle: string
+  reopened?: boolean
 }) {
   const thread = useSidebarThread(chatId)
   return (
@@ -87,7 +92,7 @@ export function TicketAlsoSentLine({ delegatorChatId, ticketId, number, chatId, 
       <span className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-1.5">
         {/* A tool row's mark slot, as the report's line has. */}
         <span className="flex h-5 w-5 items-center justify-center"><TicketGlyph /></span>
-        <span className="h-5 min-w-0 truncate text-left font-medium text-foreground/80">Also sent to {thread?.title ?? fallbackTitle}</span>
+        <span className="h-5 min-w-0 truncate text-left font-medium text-foreground/80">{reopened ? "Reopened, sent to" : "Also sent to"} {thread?.title ?? fallbackTitle}</span>
         {number !== null ? <span className="h-5 shrink-0 tabular-nums text-muted-foreground">#{number}</span> : null}
       </span>
     </button>

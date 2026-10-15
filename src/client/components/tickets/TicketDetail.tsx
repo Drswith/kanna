@@ -6,7 +6,7 @@ import type { TicketDetail, TicketHistoryEvent } from "../../../shared/tickets"
 import type { AgentProvider, ChatAttachment, ChatSkillsSnapshot, ModelOptions, ProviderCatalogEntry } from "../../../shared/types"
 import { readVisualizationArtifact } from "../../../shared/visualization"
 import { FOCUS_FALLBACK_IGNORE_ATTRIBUTE } from "../../app/chatFocusPolicy"
-import { handoffStateLabel, ticketActivityGroupLabel, ticketActivityGroupRunning, ticketActivityRows, ticketDraftKey, ticketRepliesLabel, type TicketActivityBlock } from "../../lib/tickets"
+import { handoffStateLabel, type TicketOpenQuestion, ticketActivityGroupLabel, ticketActivityGroupRunning, ticketActivityRows, ticketDraftKey, ticketRepliesLabel, type TicketActivityBlock } from "../../lib/tickets"
 import { cn } from "../../lib/utils"
 import { useChatReferenceActions, useSidebarThread } from "../chat-ui/chat-reference"
 import { chatOpenMenuItems } from "../chat-ui/ChatOpenMenuItems"
@@ -49,14 +49,44 @@ export interface TicketReplyOptions {
 
 
 /** The ticket's mark and its title, as a chat row puts its mark before its title. */
-export function TicketTitle({ ticket }: { ticket: Pick<TicketDetail, "id" | "state" | "unread" | "title"> }) {
+export function TicketTitle({ ticket, below }: {
+  ticket: Pick<TicketDetail, "id" | "state" | "unread" | "title">
+  /** Under the title, at its indent: the open question's line. */
+  below?: ReactNode
+}) {
   return (
     // Top-aligned, and the mark centred on the title's first line: a title
     // that wraps keeps its mark by its first words.
     <div className="flex items-start gap-[9px] text-lg leading-[1.3]">
       <span className={TEXT_LINE_SLOT_CLASS}><TicketMark ticket={ticket} /></span>
-      <h2 className="min-w-0 font-semibold tracking-[-0.01em] text-foreground">{ticket.title}</h2>
+      <div className="min-w-0 flex-1">
+        <h2 className="min-w-0 font-semibold tracking-[-0.01em] text-foreground">{ticket.title}</h2>
+        {below}
+      </div>
     </div>
+  )
+}
+
+/** Marks a reply's row in the activity, for the open question's line to scroll to. */
+export const TICKET_REPLY_ATTRIBUTE = "data-ticket-reply"
+
+/**
+ * What a ticket in Waiting on you waits for, in one quiet line under its
+ * title (`ticketOpenQuestion`): the delegator's question, which a click
+ * scrolls to, or the chat that is asking, which a click opens. One line in
+ * the head, not a badge on the reply: the reply is where it is answered.
+ */
+function OpenQuestionLine({ question, onOpen }: { question: TicketOpenQuestion; onOpen?: (question: TicketOpenQuestion) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen?.(question)}
+      title={question.text}
+      className="mt-1 flex max-w-full cursor-pointer items-center gap-1.5 rounded-md text-left text-sm leading-5 text-muted-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring pointer-hover:text-foreground"
+    >
+      <CircleHelp aria-hidden className="size-3.5 shrink-0" />
+      <span className="min-w-0 truncate">{question.text}</span>
+    </button>
   )
 }
 
@@ -114,12 +144,12 @@ function HandoffRow({ block, title, onOpen }: {
   const icon = block.state === "failed"
     ? <X className="size-4 text-destructive" />
     // A tool row's icon is 16px; the chat's logo is one here too.
-    : <TicketChatMark link={{ chatId: block.chatId, state: block.state }} harnessClassName="size-4 text-muted-icon" />
+    : <TicketChatMark link={{ chatId: block.chatId, state: block.state, queued: block.queued }} harnessClassName="size-4 text-muted-icon" />
   const line = (
     <ActivityLine
       icon={icon}
       label={thread?.title ?? title}
-      detail={handoffStateLabel(block.state)}
+      detail={block.queued ? "Queued" : handoffStateLabel(block.state)}
       onOpen={() => onOpen(block.chatId)}
     />
   )
@@ -151,10 +181,11 @@ function eventIcon(kind: TicketHistoryEvent["kind"]): ReactNode {
 }
 
 /**
- * The rows a reply is in the transcript's terms. The user's: their bubble,
- * with its attachments over it. The delegator's: its text,
- * then each visualization and set of files as rows of their own, as
- * `show_visualization` and `send_attachments` draw in a chat.
+ * The parts a reply is in the transcript's terms. The user's: their bubble,
+ * with its attachments over it. The delegator's: its text, then each
+ * visualization and set of files, as `show_visualization` and
+ * `send_attachments` draw in a chat. Drawn as one message: a mock posted
+ * with its words (`show_visualization` with `text`) is one reply.
  */
 function replyRows(block: Extract<TicketActivityBlock, { type: "user" | "delegator" }>): Array<{ key: string; node: ReactNode }> {
   const { reply } = block
@@ -222,7 +253,16 @@ export function TicketActivity({ blocks, chatTitle, onOpenChat }: {
           return [box(block.key, <TimeBoundary label={formatPromptBoundary(new Date(block.at).toISOString())} />)]
         }
         if (block.type === "handoff" || block.type === "event") return [box(block.key, line(block))]
-        return replyRows(block).map((reply) => box(reply.key, reply.node))
+        const parts = replyRows(block)
+        return [(
+          // Found by the line under the title that names the open question.
+          <div key={block.key} className={TRANSCRIPT_ROW_CLASS} {...{ [TICKET_REPLY_ATTRIBUTE]: block.reply.id }}>
+            {parts.length === 1
+              ? parts[0]!.node
+              // The rhythm of separate transcript rows: a row's 4px margin and 8px either side.
+              : <div className="flex flex-col gap-5">{parts.map((part) => <div key={part.key}>{part.node}</div>)}</div>}
+          </div>
+        )]
       })}
     </div>
   )
@@ -256,16 +296,19 @@ export function TicketColumn({ className, children }: { className?: string; chil
  * rule, saying how many replies there are (`ticketRepliesLabel`). Live: the
  * count is of the replies the ticket has as pushed.
  */
-export function TicketDetailBody({ ticket, activity }: {
+export function TicketDetailBody({ ticket, activity, question, onOpenQuestion }: {
   ticket: TicketDetail
   activity: ReactNode
+  /** What it waits on the user for, while it does. */
+  question?: TicketOpenQuestion | null
+  onOpenQuestion?: (question: TicketOpenQuestion) => void
 }) {
   const hasBody = Boolean(ticket.body.trim())
   return (
     <>
       {/* The same air down to the rule as above the title, from the body or, with none, the title. */}
       <TicketColumn className={cn(TICKET_HEAD_TOP_CLASS, hasBody ? "pb-1" : TICKET_BODY_END_CLASS)}>
-        <TicketTitle ticket={ticket} />
+        <TicketTitle ticket={ticket} below={question ? <OpenQuestionLine question={question} onOpen={onOpenQuestion} /> : null} />
       </TicketColumn>
       {hasBody ? (
         <TicketColumn className={cn(TICKET_BODY_END_CLASS, "pt-1.5")}>

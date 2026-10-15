@@ -94,11 +94,12 @@ export function ChatToolMessage({ message }: { message: ChatToolCall }) {
           number={ticket?.number ?? ticketRef.number}
           chatId={chatId}
           fallbackTitle={text(result?.title) ?? text(input.title) ?? "a chat"}
+          reopened={ticketRef.reopened === true}
         />
       )
     }
     // Until the board has it (a snapshot behind the call) the chat's card stands in.
-    if (ticket) return <TicketHandoffCard ticket={ticket} chatId={chatId} verb={message.toolName === "fork_chat" ? "Forked to" : "Sent to"} />
+    if (ticket) return <TicketHandoffCard ticket={ticket} chatId={chatId} verb={message.toolName === "fork_chat" ? "Forked to" : "Sent to"} reopened={ticketRef.reopened === true} />
   }
 
   const sent = text(input.message)

@@ -4,18 +4,19 @@ import type { TicketDetail } from "../../../shared/tickets"
 import type { AgentProvider, ChatSkillsSnapshot } from "../../../shared/types"
 import type { ChatInputHandle } from "../../components/chat-ui/ChatInput"
 import { useSidebarThread } from "../../components/chat-ui/chat-reference"
-import { TICKET_HEAD_TOP_CLASS, TicketActivity, TicketColumn, TicketComposer, type TicketReplyOptions, TicketDetailBody, TicketMenu, TicketTitle } from "../../components/tickets/TicketDetail"
+import { TICKET_HEAD_TOP_CLASS, TICKET_REPLY_ATTRIBUTE, TicketActivity, TicketColumn, TicketComposer, type TicketReplyOptions, TicketDetailBody, TicketMenu, TicketTitle } from "../../components/tickets/TicketDetail"
 import { ViewerIconButton, ViewerSurface } from "../../components/viewer/ViewerSurface"
 import { copyTextToClipboard } from "../../lib/clipboard"
 import { delegatorDisplayTitle } from "../../lib/delegators"
 import { snapshotDroppedFiles } from "../../lib/snapshotDroppedFiles"
-import { adjacentTicketId, ticketActivityBlocks, ticketLinkPath, ticketReplyCommand, ticketStepOrder } from "../../lib/tickets"
+import { adjacentTicketId, ticketActivityBlocks, ticketLinkPath, ticketOpenQuestion, ticketReplyCommand, ticketStepOrder, type TicketOpenQuestion } from "../../lib/tickets"
 import { useStableSidebarThreads } from "../useStableSidebarThreads"
 import { useSidebarStore } from "../../stores/sidebarStore"
 import { useTicketBoard, useTicketSummary } from "../../stores/ticketBoardStore"
 import { useViewerStore, type ViewerItem } from "../../stores/viewerStore"
 import { viewerLevelBelow } from "../../lib/viewer-levels"
 import type { ViewerNavigation } from "../../components/viewer/ViewerSurface"
+import { prefersReducedMotion } from "../paneAnimation"
 import { useOpenChat } from "../useOpenChat"
 import type { ChatPreviewContext } from "./ChatPreview"
 import { hasFileDragTypes } from "./utils"
@@ -155,6 +156,15 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
   }, [chatId, ticketId])
 
   const openChat = useOpenChat()
+  const question = useMemo(() => (detail ? ticketOpenQuestion(detail, nameOfChat) : null), [detail, nameOfChat])
+  const openQuestion = (open: TicketOpenQuestion) => {
+    if (open.kind === "chat") {
+      openChat(open.chatId, { from: "preview" })
+      return
+    }
+    const row = scrollRef.current?.querySelector(`[${TICKET_REPLY_ATTRIBUTE}="${CSS.escape(open.replyId)}"]`)
+    row?.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" })
+  }
   const number = head ? `#${head.number}` : "Ticket"
   return (
     <ViewerSurface
@@ -193,6 +203,8 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
       >
         {shown ? (
           <TicketDetailBody
+            question={question}
+            onOpenQuestion={openQuestion}
             ticket={shown}
             activity={<TicketActivity blocks={blocks} chatTitle={nameOfChat} onOpenChat={(id) => openChat(id, { from: "preview" })} />}
           />

@@ -74,12 +74,12 @@ function TicketDoneMark() {
  * news, and the chip only who did the work.
  */
 export function TicketChatMark({ link, harnessClassName = "size-3 text-muted-foreground" }: {
-  link: Pick<TicketChatLink, "chatId" | "state">
+  link: Pick<TicketChatLink, "chatId" | "state" | "queued">
   /** The logo's size and colour: a widget row's column sizes it itself, a tool row's slot takes 16px. */
   harnessClassName?: string
 }) {
   const thread = useSidebarThread(link.chatId)
-  const kind = ticketChipMarkKind(link.state)
+  const kind = ticketChipMarkKind(link.state, link.queued === true)
   if (kind !== "harness") return <StatusMark kind={kind} label={kind === "working" ? "Working" : "Waiting on you"} />
   const Harness = thread?.row.provider ? PROVIDER_ICONS[thread.row.provider] : MessageCircle
   return (

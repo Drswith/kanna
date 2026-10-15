@@ -156,7 +156,9 @@ export function ticketWantsUser(ticket: Pick<TicketSummary, "state" | "unread">)
 /** A linked chat's mark on a chip: its status while it has one, else its harness logo. */
 export type TicketChipMarkKind = "working" | "waiting" | "harness"
 
-export function ticketChipMarkKind(state: TicketChatState): TicketChipMarkKind {
+export function ticketChipMarkKind(state: TicketChatState, queued = false): TicketChipMarkKind {
+  // Queued is not at work on this yet: still, as a chat with nothing running is.
+  if (queued) return "harness"
   if (state === "working") return "working"
   if (state === "waiting_on_you") return "waiting"
   return "harness"
@@ -171,8 +173,12 @@ export function ticketChipMarkKind(state: TicketChatState): TicketChipMarkKind {
 export function ticketShortState(ticket: Pick<TicketSummary, "state" | "chats">): string {
   if (ticket.state === "waiting_on_you") return "asking you"
   if (ticket.state === "in_progress") {
-    const working = ticket.chats.filter((chat) => chat.outstanding && chat.state === "working").length
-    return working > 1 ? `${working} chats working` : "working"
+    const live = ticket.chats.filter((chat) => chat.outstanding)
+    // A queued chat is working on something else: this ticket's work has not started.
+    const working = live.filter((chat) => !chat.queued && chat.state === "working").length
+    if (working > 1) return `${working} chats working`
+    if (working === 0 && live.some((chat) => chat.queued)) return "queued"
+    return "working"
   }
   const failed = ticket.chats.some((chat) => chat.state === "failed")
   if (ticket.chats.length > 1) return `${ticket.chats.length} chats ${failed ? "done" : "finished"}`
@@ -220,6 +226,11 @@ export type TicketActivityBlock =
     state: TicketChatState
     /** When the chat reported on it, finished or failed. */
     settledAt?: number
+    /**
+     * Still in the chat's queue, behind its other work (`TicketChatLink.queued`):
+     * reads "Queued", whatever `state`, the chat's own, says.
+     */
+    queued?: true
   }
   | {
     type: "event"
@@ -306,9 +317,13 @@ export function ticketActivityBlocks(
 
   // What has not reported reads as its chat does now: still working, asking,
   // or stopped without a word.
-  const live = new Map(ticket.chats.map((link) => [link.chatId, link.state]))
+  const live = new Map(ticket.chats.map((link) => [link.chatId, link]))
   for (const waiting of open.values()) {
-    for (const block of waiting) block.state = live.get(block.chatId) ?? (asked.has(block) ? "waiting_on_you" : "working")
+    for (const block of waiting) {
+      const link = live.get(block.chatId)
+      block.state = link?.state ?? (asked.has(block) ? "waiting_on_you" : "working")
+      if (link?.queued) block.queued = true
+    }
   }
   return blocks
 }
@@ -342,7 +357,39 @@ export function ticketActivityGroupLabel(blocks: readonly TicketActivityBlock[])
 
 /** Whether a group is still at work, as a tool group with a call in flight is: a chat in it is working. */
 export function ticketActivityGroupRunning(blocks: readonly TicketActivityBlock[]): boolean {
-  return blocks.some((block) => block.type === "handoff" && block.state === "working")
+  return blocks.some((block) => block.type === "handoff" && block.state === "working" && !block.queued)
+}
+
+/**
+ * What a ticket waiting on the user waits for, for the line under its title:
+ * the delegator's open question (its reply with `asksUser`, the latest), or
+ * the chat that is asking. Null when it waits on nothing. A queued chat's
+ * state is about its other work, so it is not the one asking.
+ */
+export type TicketOpenQuestion =
+  | { kind: "reply"; replyId: string; text: string }
+  | { kind: "chat"; chatId: string; text: string }
+
+export function ticketOpenQuestion(
+  ticket: Pick<TicketDetail, "state" | "asksUser" | "replies" | "chats">,
+  chatTitle: (chatId: string) => string,
+): TicketOpenQuestion | null {
+  if (ticket.state !== "waiting_on_you") return null
+  if (ticket.asksUser) {
+    const reply = [...ticket.replies].reverse().find((candidate) => candidate.author === "delegator" && candidate.asksUser)
+    if (reply) return { kind: "reply", replyId: reply.id, text: firstLine(reply.text) ?? "The delegator asks you something" }
+  }
+  const asking = ticket.chats.find((link) => link.outstanding && !link.queued && link.state === "waiting_on_you")
+  return asking ? { kind: "chat", chatId: asking.chatId, text: `${chatTitle(asking.chatId)} is asking you` } : null
+}
+
+/** A markdown text's first line of words, without its block marks (a heading's #, a list's -, a quote's >). */
+function firstLine(text: string): string | null {
+  for (const line of text.split("\n")) {
+    const words = line.replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*|\d+[.)]\s+)*/, "").replace(/[*_`]/g, "").trim()
+    if (words) return words
+  }
+  return null
 }
 
 /**
@@ -373,6 +420,8 @@ export interface HandoffTicketRef {
   ticketId: string
   /** From the call itself, for a ticket the board no longer has. */
   number: number | null
+  /** The hand-off took the ticket back out of Done (the result's `ticket.reopened`). */
+  reopened?: true
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -431,7 +480,8 @@ export function handoffTicketOf(message: HandoffCandidate): HandoffTicketRef | n
   }
   const ticket = record(resultObject(message.rawResult)?.ticket)
   const ticketId = ticketIdOf(ticket?.id)
-  return ticketId ? { ticketId, number: numberOf(ticket?.number) } : null
+  if (!ticketId) return null
+  return { ticketId, number: numberOf(ticket?.number), ...(ticket?.reopened === true ? { reopened: true as const } : {}) }
 }
 
 /**

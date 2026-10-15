@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import type { TicketDetail } from "../../../shared/tickets"
-import { ticketActivityBlocks } from "../../lib/tickets"
-import { TicketActivity, TicketDetailBody } from "./TicketDetail"
+import { ticketActivityBlocks, ticketOpenQuestion } from "../../lib/tickets"
+import { TICKET_REPLY_ATTRIBUTE, TicketActivity, TicketDetailBody } from "./TicketDetail"
 
 const at = (hour: number, minute: number) => new Date(2026, 9, 15, hour, minute).getTime()
 
@@ -151,5 +151,74 @@ describe("the activity's folded runs", () => {
     expect(html).toContain("1 close, 1 reopen, 1 hand-off")
     expect(html).not.toContain("Closed by Main")
     expect(html).toContain("kanna-shiny-track")
+  })
+})
+
+describe("a ticket that waits on the user", () => {
+  const asking: TicketDetail = {
+    ...ticket,
+    state: "waiting_on_you",
+    asksUser: true,
+    replies: [
+      { id: "r1", ticketId: "tk_000002", author: "user", text: "can you mock it up first", createdAt: at(11, 10) },
+      {
+        id: "r9",
+        ticketId: "tk_000002",
+        author: "delegator",
+        text: "Should an edit replace the original?\n\nThe mock shows both.",
+        asksUser: true,
+        artifacts: [{ type: "visualization", version: 1, title: "Edit mock", height: 360, url: "/api/chats/deleg/media/visualization-mock.html" }],
+        createdAt: at(11, 32),
+      },
+    ],
+  }
+  const question = ticketOpenQuestion(asking, names.chat)
+  const html = renderToStaticMarkup(
+    <TicketDetailBody
+      ticket={asking}
+      question={question}
+      activity={<TicketActivity blocks={ticketActivityBlocks(asking, names)} chatTitle={names.chat} onOpenChat={() => {}} />}
+    />,
+  )
+
+  test("names the question in one line under the title, before the body", () => {
+    expect(question).toMatchObject({ kind: "reply", replyId: "r9", text: "Should an edit replace the original?" })
+    const title = html.indexOf("Edit a visualization")
+    const line = html.indexOf('title="Should an edit replace the original?"')
+    expect(line).toBeGreaterThan(title)
+    expect(line).toBeLessThan(html.indexOf("Let the user edit"))
+  })
+
+  test("marks the reply the line scrolls to", () => {
+    expect(html).toContain(`${TICKET_REPLY_ATTRIBUTE}="r9"`)
+  })
+
+  test("draws a mock posted with its words as one message: the words, then the mock", () => {
+    const row = html.slice(html.indexOf(`${TICKET_REPLY_ATTRIBUTE}="r9"`))
+    const end = row.indexOf(TICKET_REPLY_ATTRIBUTE, 1)
+    const message = end > 0 ? row.slice(0, end) : row
+    expect(message.indexOf("The mock shows both.")).toBeGreaterThan(-1)
+    // The visualization, before it loads (all a server render draws of it).
+    expect(message.indexOf('class="visualization')).toBeGreaterThan(message.indexOf("The mock shows both."))
+  })
+
+  test("shows no line while it waits on no one", () => {
+    // The same asking reply, on a ticket that is In progress.
+    expect(render()).not.toContain('title="Should an edit replace the original?"')
+  })
+})
+
+describe("a hand-off still in its chat's queue", () => {
+  const queued: TicketDetail = {
+    ...ticket,
+    chats: [{ chatId: "c1", title: "Download", state: "working", outstanding: true, queued: true, lastSentAt: at(11, 8) }],
+    history: [{ id: "q1", ticketId: "tk_000002", createdAt: at(11, 8), kind: "sent_to", chatId: "c1" }],
+    replies: [],
+  }
+  const html = renderToStaticMarkup(<TicketActivity blocks={ticketActivityBlocks(queued, names)} chatTitle={names.chat} onOpenChat={() => {}} />)
+
+  test("reads Queued, not Working, with no spinner", () => {
+    expect(html).toContain(">Queued<")
+    expect(html).not.toContain(">Working<")
   })
 })

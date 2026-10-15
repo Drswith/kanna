@@ -7,6 +7,7 @@ import {
   ticketActivityGroupLabel,
   ticketActivityGroupRunning,
   ticketActivityRows,
+  ticketOpenQuestion,
   formatTicketNumbers,
   groupTicketBoard,
   handoffTicketOf,
@@ -168,6 +169,15 @@ describe("ticketShortState", () => {
     expect(ticketShortState({ state: "done", chats: [link("a", "finished")] })).toBe("finished")
     expect(ticketShortState({ state: "done", chats: [link("a", "finished"), link("b", "finished")] })).toBe("2 chats finished")
   })
+
+  test("a ticket whose chats all hold it in their queues is queued, not working", () => {
+    const queued = { ...link("a", "working"), queued: true as const }
+    expect(ticketShortState({ state: "in_progress", chats: [queued] })).toBe("queued")
+    // One chat at work on it is enough to call it working.
+    expect(ticketShortState({ state: "in_progress", chats: [queued, link("b", "working")] })).toBe("working")
+    expect(ticketChipMarkKind("working", true)).toBe("harness")
+    expect(ticketChipMarkKind("working")).toBe("working")
+  })
 })
 
 describe("hand-offs in a delegator's transcript", () => {
@@ -185,6 +195,11 @@ describe("hand-offs in a delegator's transcript", () => {
     expect(handoffTicketOf(call("a", { chatId: "c1", ticket: { id: "tk_00000d", number: 13 } }))).toEqual({ ticketId: "tk_00000d", number: 13 })
     expect(handoffTicketOf(call("a", JSON.stringify({ ticket: { id: "tk_00000d", number: 13 } })))).toEqual({ ticketId: "tk_00000d", number: 13 })
     expect(handoffTicketOf(call("a", undefined, { input: { payload: { ticketId: "tk_00000d" } } }))).toEqual({ ticketId: "tk_00000d", number: null })
+  })
+
+  test("says when the hand-off reopened a Done ticket", () => {
+    expect(handoffTicketOf(call("a", { chatId: "c1", ticket: { id: "tk_00000d", number: 3, reopened: true, note: "Reopened #3, which was Done." } })))
+      .toEqual({ ticketId: "tk_00000d", number: 3, reopened: true })
   })
 
   test("a returned call is read from its result alone", () => {
@@ -411,6 +426,16 @@ describe("ticketActivityBlocks", () => {
     expect(blocks([], [reply(1, "delegator", "hello"), reply(2, "delegator", "again")]).map((block) => block.type)).toEqual(["delegator", "delegator"])
   })
 
+  test("a hand-off still in its chat's queue reads Queued, and does not count as running", () => {
+    const queued = { ...link("a", "working"), queued: true as const }
+    const list = handoffs(blocks([event(1, { kind: "sent_to", chatId: "a" })], [], [queued]))
+    expect(list).toMatchObject([{ state: "working", queued: true }])
+    const run = blocks([event(1, { kind: "renamed", from: "Old" }), event(2, { kind: "sent_to", chatId: "a" })], [], [queued])
+    expect(ticketActivityGroupRunning(run)).toBe(false)
+    // Once its turn starts the link is no longer queued, and the row is Working.
+    expect(handoffs(blocks([event(1, { kind: "sent_to", chatId: "a" })], [], [link("a", "working")]))[0]!.queued).toBeUndefined()
+  })
+
   describe("folded as the transcript folds tool calls", () => {
     const rows = (list: ReturnType<typeof blocks>) => ticketActivityRows(list).map((row) => (row.type === "group" ? row.items.map((block) => block.type) : row.item.type))
 
@@ -483,5 +508,31 @@ describe("a ticket's link in a message", () => {
     expect(opensTicketInPane({ ...click, ctrlKey: true }, true)).toBe(false)
     expect(opensTicketInPane({ ...click, button: 1 }, true)).toBe(false)
     expect(opensTicketInPane(click, false)).toBe(false)
+  })
+})
+
+describe("the open question", () => {
+  const reply = (id: string, author: "user" | "delegator", text: string, asksUser = false): TicketReply => ({ id, ticketId: "tk_000001", author, text, createdAt: 1, ...(asksUser ? { asksUser: true as const } : {}) })
+  const chat = (chatId: string, state: "working" | "waiting_on_you", extra: { queued?: true } = {}) => ({ chatId, title: chatId, state, outstanding: true, lastSentAt: 0, ...extra })
+  const title = (chatId: string) => `Chat ${chatId}`
+
+  test("is the delegator's latest asking reply, by its first line of words", () => {
+    const question = ticketOpenQuestion({
+      state: "waiting_on_you",
+      asksUser: true,
+      chats: [],
+      replies: [reply("r1", "delegator", "Old?", true), reply("r2", "delegator", "## Which wording?\n\nOne: Closed by you.", true), reply("r3", "delegator", "An update.")],
+    }, title)
+    expect(question).toEqual({ kind: "reply", replyId: "r2", text: "Which wording?" })
+  })
+
+  test("is the chat that is asking, when the delegator asks nothing; a queued chat is not asking about this ticket", () => {
+    expect(ticketOpenQuestion({ state: "waiting_on_you", asksUser: false, replies: [], chats: [chat("a", "working"), chat("b", "waiting_on_you")] }, title))
+      .toEqual({ kind: "chat", chatId: "b", text: "Chat b is asking you" })
+    expect(ticketOpenQuestion({ state: "waiting_on_you", asksUser: false, replies: [], chats: [chat("b", "waiting_on_you", { queued: true })] }, title)).toBeNull()
+  })
+
+  test("is nothing on a ticket that waits on no one", () => {
+    expect(ticketOpenQuestion({ state: "in_progress", asksUser: false, replies: [reply("r1", "delegator", "Which?", true)], chats: [] }, title)).toBeNull()
   })
 })
