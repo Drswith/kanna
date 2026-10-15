@@ -1,13 +1,16 @@
 import { memo, useMemo } from "react"
-import { Network } from "lucide-react"
 import { ThreadRowContent } from "../../components/chat-ui/ThreadRowContent"
 import { TicketBoardColumns, TicketBoardList } from "../../components/tickets/TicketBoard"
-import { useViewerPlacement, VIEWER_END_PAD_CLASS, ViewerIconButton, ViewerSurface } from "../../components/viewer/ViewerSurface"
+import { useViewerPlacement, VIEWER_END_PAD_CLASS, ViewerSurface } from "../../components/viewer/ViewerSurface"
 import { getThreadDetailLabel } from "../../lib/thread-detail-label"
 import type { SidebarThread } from "../../lib/thread-sections"
 import { cn, normalizeChatId } from "../../lib/utils"
 import type { TicketBoard } from "../../stores/ticketBoardStore"
+import { useSectionOverrides } from "../../stores/sidebarSectionStore"
 import { openViewer } from "../../stores/viewerStore"
+
+/** The key "Other chats" is folded under, in the board's list of sections. */
+const OTHER_CHATS_SECTION = "other-chats"
 
 /**
  * A delegator's ticket board in the pane, where its list of chats was: what
@@ -21,7 +24,7 @@ import { openViewer } from "../../stores/viewerStore"
  */
 export const TicketBoardPane = memo(function TicketBoardPane({ delegatorChatId, delegatorTitle, board, threads, nowMs, onSelectChat, onClose }: {
   delegatorChatId: string
-  /** Null for a delegator not named yet: the pane is then just "Board". */
+  /** Null for a delegator not named yet: the pane is then just "Tickets". */
   delegatorTitle: string | null
   board: TicketBoard
   /** The sidebar's chats, for the ones under "Other chats". */
@@ -31,6 +34,11 @@ export const TicketBoardPane = memo(function TicketBoardPane({ delegatorChatId, 
   onClose: () => void
 }) {
   const expanded = useViewerPlacement()?.expanded ?? false
+  // Folded until opened, and kept as it was left while the page is open (a
+  // ticket opened over the board and closed again finds it as it was), as
+  // the sidebar's own sections are kept.
+  const [sectionOverrides, setSectionExpanded] = useSectionOverrides(`delegated:${delegatorChatId}`)
+  const othersExpanded = sectionOverrides[OTHER_CHATS_SECTION] ?? false
   const openTicket = (ticketId: string) => openViewer({ kind: "ticket", chatId: delegatorChatId, ticketId })
 
   const others = useMemo(() => {
@@ -57,14 +65,9 @@ export const TicketBoardPane = memo(function TicketBoardPane({ delegatorChatId, 
 
   return (
     <ViewerSurface
-      label={delegatorTitle ? `Ticket board, ${delegatorTitle}` : "Ticket board"}
-      title={<span className="font-semibold">Board</span>}
+      label={delegatorTitle ? `Tickets, ${delegatorTitle}` : "Tickets"}
+      title={<span className="font-semibold">Tickets</span>}
       subtitle={delegatorTitle ?? undefined}
-      toolbar={(
-        <ViewerIconButton label="Show graph" onClick={() => openViewer({ kind: "graph", chatId: delegatorChatId })}>
-          <Network />
-        </ViewerIconButton>
-      )}
       onClose={onClose}
       bodyClassName={expanded ? "flex flex-col overflow-hidden" : undefined}
       // Back from a ticket is a new card: it opens where the board was left.
@@ -84,7 +87,7 @@ export const TicketBoardPane = memo(function TicketBoardPane({ delegatorChatId, 
             tickets={board.tickets}
             nowMs={nowMs}
             onOpenTicket={openTicket}
-            otherChats={otherRows ? { count: others.length, rows: otherRows } : null}
+            otherChats={otherRows ? { count: others.length, rows: otherRows, expanded: othersExpanded, onToggle: () => setSectionExpanded(OTHER_CHATS_SECTION, !othersExpanded) } : null}
           />
         </div>
       )}

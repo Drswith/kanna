@@ -12,6 +12,19 @@ import { cn } from "../../lib/utils"
 export const STATUS_MARK_SLOT_CLASS = "flex size-4 shrink-0 items-center justify-center"
 
 /**
+ * A box one line of its text tall, centring what is in it: how a mark sits
+ * beside text that is not the 20px line a row's slot is cut for (a title).
+ * Give it the text's own size and leading, so `1lh` is that text's line.
+ *
+ * The rule every icon follows: centred on its text's line box. For Body
+ * (ascent .952, descent .241, cap height .700 of the em) the cap height's
+ * centre sits .0055em under the line box's, a tenth of a pixel at 18px, so
+ * that is centring on the caps. It is how the header's back chevron sits
+ * beside the title, and what a row's 20px slot does beside its 20px line.
+ */
+export const TEXT_LINE_SLOT_CLASS = "flex h-[1lh] shrink-0 items-center"
+
+/**
  * The sidebar's status marks, one per thing a row can want: the brand spinner
  * while working, a grey one while waiting on work handed off, a blue ping
  * when waiting on the user, a green ping when unread. A chat's row draws them

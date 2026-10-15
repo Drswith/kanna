@@ -1,4 +1,5 @@
 import { CHAT_TOOL_NAMES } from "../../shared/tools"
+import type { AgentProvider, ChatAttachment, ModelOptions } from "../../shared/types"
 import {
   compareTicketsByActivity,
   TICKET_ID_PATTERN,
@@ -55,6 +56,23 @@ export function groupTicketBoard(tickets: readonly TicketSummary[], { showAllDon
   })
 }
 
+/**
+ * Every ticket, in the order stepping goes through them from an open one
+ * (the ↑ and ↓ in its header, k and j): the list's, top to bottom, with
+ * Done's read tickets in it too, as "Show N more" shows them, so a step
+ * reaches each one. The delegator's other chats are not tickets, and are not in it.
+ */
+export function ticketStepOrder(tickets: readonly TicketSummary[]): string[] {
+  return groupTicketBoard(tickets, { showAllDone: true }).flatMap((group) => group.tickets.map((ticket) => ticket.id))
+}
+
+/** The ticket a step from `ticketId` lands on, or null at that end, and for a ticket not in the order. */
+export function adjacentTicketId(order: readonly string[], ticketId: string, direction: "next" | "previous"): string | null {
+  const index = order.indexOf(ticketId)
+  if (index < 0) return null
+  return order[index + (direction === "next" ? 1 : -1)] ?? null
+}
+
 /** The full board's columns: all three, empty or not, so they hold their places. */
 export function ticketBoardColumns(tickets: readonly TicketSummary[]): TicketBoardGroup[] {
   return BOARD_ORDER.map((state) => {
@@ -91,11 +109,6 @@ export function ticketChipMarkKind(state: TicketChatState): TicketChipMarkKind {
   return "harness"
 }
 
-function joinNames(names: readonly string[]): string {
-  if (names.length <= 1) return names[0] ?? ""
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
-}
-
 /**
  * How a ticket stands, in the few words after "Sent to X" on its card in the
  * delegator's transcript: "working", "2 chats working", "asking you",
@@ -115,34 +128,59 @@ export function ticketShortState(ticket: Pick<TicketSummary, "state" | "chats">)
 
 // ── Activity ──────────────────────────────────────────────────────────────
 
-export type TicketActivityRow =
-  | { type: "reply"; key: string; at: number; reply: TicketReply }
-  /** One quiet line, standing for one or more history events. */
-  | { type: "history"; key: string; at: number; text: string }
-
 /** What the activity calls the people in it. Kanna knows no name for the user, so they are "you". */
 export interface TicketActivityNames {
   chat: (chatId: string) => string
   delegator: string
 }
 
-type ChatEventKind = "sent_to" | "chat_finished" | "chat_failed" | "chat_asking"
+/**
+ * A ticket's activity, as the pane draws it, in the transcript's own forms.
+ * The user's replies are their bubbles and the delegator's are an agent's
+ * text, as each would read in a chat.
+ *
+ * A hand-off is one row, where it was sent, standing for the chat it went to
+ * and kept up to date there: working, then finished, failed or asking you.
+ * Not a line for the send and another for the report, which said one thing
+ * twice, a screen apart. A second hand-off to the same chat is a row of its
+ * own, where it was sent.
+ *
+ * Everything else in the history (a close, a reopen, a rename) is a tool row
+ * of its own. They come one at a time, so nothing is folded.
+ *
+ * The user's message opens a turn, as their prompt does in a chat, and the
+ * rule with the time on it goes over it (`TimeBoundary`), the chat's way of
+ * dating a prompt. Not over the first thing in the activity, as a chat's
+ * first prompt has none either.
+ */
+export type TicketActivityBlock =
+  | { type: "divider"; key: string; at: number }
+  | { type: "user"; key: string; reply: TicketReply }
+  | { type: "delegator"; key: string; reply: TicketReply }
+  | {
+    type: "handoff"
+    key: string
+    /** When it was sent: where the row sits. */
+    at: number
+    chatId: string
+    /** How the work stands: from the chat's report once there is one, else the chat's own state now. */
+    state: TicketChatState
+    /** When the chat reported on it, finished or failed. */
+    settledAt?: number
+  }
+  | {
+    type: "event"
+    key: string
+    at: number
+    text: string
+    kind: TicketHistoryEvent["kind"]
+    /** The chat it names, which a click on it opens. */
+    chatId?: string
+  }
 
-function isChatEvent(event: TicketHistoryEvent): event is Extract<TicketHistoryEvent, { kind: ChatEventKind }> {
-  return event.kind === "sent_to" || event.kind === "chat_finished" || event.kind === "chat_failed" || event.kind === "chat_asking"
-}
+type HandoffBlock = Extract<TicketActivityBlock, { type: "handoff" }>
 
-function chatEventText(kind: ChatEventKind, names: string[], lastSent: readonly string[]): string {
-  if (kind === "sent_to") return `Sent to ${joinNames(names)}`
-  if (kind === "chat_asking") return `${joinNames(names)} ${names.length > 1 ? "are" : "is"} asking you`
-  const verb = kind === "chat_finished" ? "finished" : "failed"
-  // The chats the line above sent it to, all done at once, need not be named again.
-  const same = names.length > 1 && names.length === lastSent.length && names.every((name) => lastSent.includes(name))
-  if (same) return `${names.length === 2 ? "Both" : `All ${names.length}`} ${verb}`
-  return `${joinNames(names)} ${verb}`
-}
-
-function soloEventText(event: TicketHistoryEvent, names: TicketActivityNames): string {
+function eventText(event: TicketHistoryEvent, names: TicketActivityNames): string {
   const who = (by: "user" | "delegator" | undefined) => (by === "delegator" ? names.delegator : "you")
   switch (event.kind) {
     case "closed": return `Closed by ${who(event.by)}`
@@ -151,66 +189,87 @@ function soloEventText(event: TicketHistoryEvent, names: TicketActivityNames): s
       if (event.cause === "chat_started") return event.chatId ? `Reopened: ${names.chat(event.chatId)} started` : "Reopened"
       return `Reopened by ${who(event.by)}`
     case "renamed": return `Renamed from ‘${event.from}’`
-    default: return ""
+    // A report with no hand-off before it to land on (one sent before the
+    // board kept them): said where it happened.
+    case "chat_finished": return `${names.chat(event.chatId)} finished`
+    case "chat_failed": return `${names.chat(event.chatId)} failed`
+    case "chat_asking": return `${names.chat(event.chatId)} is asking you`
+    case "sent_to": return `Sent to ${names.chat(event.chatId)}`
   }
 }
 
-/**
- * A ticket's activity as it reads: replies in full, and between them the
- * history as few quiet lines as say it.
- *
- * In a run of history with no reply in it, events of one kind in a row are
- * one line ("Sent to A and B", "Both finished"). A run of finishes that
- * leaves no chat still owing a report is when the ticket went Done, and says
- * so on the same line ("Both finished · Done"): the server keeps no event for
- * that, since it is derived, so it is read back here from the sends and
- * finishes before it. Everything else is a line of its own.
- */
-export function collapseTicketActivity(
-  ticket: Pick<TicketDetail, "replies" | "history">,
+export function ticketActivityBlocks(
+  ticket: Pick<TicketDetail, "replies" | "history" | "chats">,
   names: TicketActivityNames,
-): TicketActivityRow[] {
-  const rows: TicketActivityRow[] = []
-  // Chats sent work and not yet finished, replayed from the history.
-  const owing = new Set<string>()
-  let lastSent: string[] = []
-  // The line being built from a run of one kind of chat event.
-  let open: { kind: ChatEventKind; key: string; at: number; names: string[]; chatIds: Set<string> } | null = null
-
-  const flush = () => {
-    if (!open) return
-    let text = chatEventText(open.kind, open.names, lastSent)
-    if (open.kind === "sent_to") lastSent = open.names
-    else if ((open.kind === "chat_finished" || open.kind === "chat_failed") && owing.size === 0) text += " · Done"
-    rows.push({ type: "history", key: open.key, at: open.at, text })
-    open = null
-  }
+): TicketActivityBlock[] {
+  const blocks: TicketActivityBlock[] = []
+  // Each chat's hand-offs still waiting on its report. A final report clears
+  // every one of them (the server's rule), so it settles them all.
+  const open = new Map<string, HandoffBlock[]>()
+  const asked = new Set<HandoffBlock>()
 
   for (const item of ticketActivity(ticket)) {
     if (item.type === "reply") {
-      flush()
-      rows.push({ type: "reply", key: item.reply.id, at: item.at, reply: item.reply })
+      const mine = item.reply.author === "user"
+      if (mine && blocks.length > 0) blocks.push({ type: "divider", key: `${item.reply.id}:divider`, at: item.at })
+      blocks.push({ type: mine ? "user" : "delegator", key: item.reply.id, reply: item.reply })
       continue
     }
     const event = item.event
-    if (!isChatEvent(event)) {
-      flush()
-      const text = soloEventText(event, names)
-      if (text) rows.push({ type: "history", key: event.id, at: event.createdAt, text })
+    if (event.kind === "sent_to") {
+      const block: HandoffBlock = { type: "handoff", key: event.id, at: event.createdAt, chatId: event.chatId, state: "working" }
+      blocks.push(block)
+      open.set(event.chatId, [...(open.get(event.chatId) ?? []), block])
       continue
     }
-    if (event.kind === "sent_to") owing.add(event.chatId)
-    else if (event.kind !== "chat_asking") owing.delete(event.chatId)
-    if (open && open.kind !== event.kind) flush()
-    if (!open) open = { kind: event.kind, key: event.id, at: event.createdAt, names: [], chatIds: new Set() }
-    if (!open.chatIds.has(event.chatId)) {
-      open.chatIds.add(event.chatId)
-      open.names.push(names.chat(event.chatId))
+    if (event.kind === "chat_finished" || event.kind === "chat_failed" || event.kind === "chat_asking") {
+      const waiting = open.get(event.chatId) ?? []
+      if (waiting.length > 0) {
+        if (event.kind === "chat_asking") {
+          for (const block of waiting) asked.add(block)
+        } else {
+          for (const block of waiting) {
+            block.state = event.kind === "chat_finished" ? "finished" : "failed"
+            block.settledAt = event.createdAt
+            asked.delete(block)
+          }
+          open.delete(event.chatId)
+        }
+        continue
+      }
     }
-    open.at = Math.max(open.at, event.createdAt)
+    const chatId = "chatId" in event && typeof event.chatId === "string" ? event.chatId : undefined
+    blocks.push({ type: "event", key: event.id, at: event.createdAt, text: eventText(event, names), kind: event.kind, ...(chatId ? { chatId } : {}) })
   }
-  flush()
-  return rows
+
+  // What has not reported reads as its chat does now: still working, asking,
+  // or stopped without a word.
+  const live = new Map(ticket.chats.map((link) => [link.chatId, link.state]))
+  for (const waiting of open.values()) {
+    for (const block of waiting) block.state = live.get(block.chatId) ?? (asked.has(block) ? "waiting_on_you" : "working")
+  }
+  return blocks
+}
+
+/**
+ * The rule between a ticket's body and its activity: how many replies there
+ * are, the user's and the delegator's. Not the hand-offs and other events,
+ * which are not anything anyone said.
+ */
+export function ticketRepliesLabel(count: number): string {
+  if (count === 0) return "No replies yet"
+  return `${count} ${count === 1 ? "reply" : "replies"}`
+}
+
+/** What a hand-off's row says of it: "Working", "Finished", "Asking you". */
+export function handoffStateLabel(state: TicketChatState): string {
+  switch (state) {
+    case "working": return "Working"
+    case "waiting_on_you": return "Asking you"
+    case "finished": return "Finished"
+    case "failed": return "Failed"
+    case "stopped": return "Stopped"
+  }
 }
 
 // ── The delegator's transcript ────────────────────────────────────────────
@@ -326,6 +385,50 @@ export function formatTicketNumbers(numbers: readonly number[]): string {
   return numbers.map((number) => `#${number}`).join(", ")
 }
 
+// ── Replying ──────────────────────────────────────────────────────────────
+
+/**
+ * Where a ticket's composer keeps its draft (`chatInputStore`): its own key,
+ * apart from the delegator chat's draft and from every other ticket's. Not
+ * a chat id, so nothing that reads drafts as chats can take it for one.
+ */
+export function ticketDraftKey(delegatorChatId: string, ticketId: string): string {
+  return `ticket:${delegatorChatId}:${ticketId}`
+}
+
+/** The composer's settings for the turn a reply starts, as `chat.send` carries them. */
+export interface TicketReplyRun {
+  provider?: AgentProvider
+  model?: string
+  modelOptions?: ModelOptions
+  planMode?: boolean
+  autoPlan?: boolean
+}
+
+/**
+ * The command a reply sends: what was typed, trimmed, the composer's
+ * uploads as they came back from the upload route (the shape a chat's
+ * message carries them in), and its settings. None of either is left out
+ * rather than sent empty.
+ */
+export function ticketReplyCommand(
+  delegatorChatId: string,
+  ticketId: string,
+  text: string,
+  attachments: readonly ChatAttachment[] = [],
+  run: TicketReplyRun = {},
+) {
+  const settings = Object.fromEntries(Object.entries(run).filter(([, value]) => value !== undefined)) as TicketReplyRun
+  return {
+    type: "ticket.reply" as const,
+    chatId: delegatorChatId,
+    ticketId,
+    text: text.trim(),
+    ...(attachments.length > 0 ? { attachments: [...attachments] } : {}),
+    ...settings,
+  }
+}
+
 // ── Links ─────────────────────────────────────────────────────────────────
 
 /** The query parameter that opens a ticket over its delegator's chat. */
@@ -367,6 +470,11 @@ export function formatTicketTime(at: number, nowMs: number): string {
   if (sameDay(date, now)) return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
   if (nowMs - at < 6 * 24 * 60 * 60 * 1000 && at < nowMs) return date.toLocaleDateString(undefined, { weekday: "short" })
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }) })
+}
+
+/** The full date and time, for the tooltip on a relative one. */
+export function formatTicketFullTime(at: number): string {
+  return new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
 }
 
 /** The linked chat a hand-off went to, for its card: by id, else the latest. */

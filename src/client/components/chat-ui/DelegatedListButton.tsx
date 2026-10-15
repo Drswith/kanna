@@ -5,7 +5,7 @@ import { useSidebarStore } from "../../stores/sidebarStore"
 import { useTicketBoardStore } from "../../stores/ticketBoardStore"
 import { openViewer, useViewerStore } from "../../stores/viewerStore"
 import { Button } from "../ui/button"
-import { DelegatorIcon } from "./delegator-icon"
+import { ListTodo } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 
 /** The delegated list's toggle, read once: for the command palette, which shows the same state. */
@@ -24,10 +24,11 @@ export function toggleDelegatedPane(chatId: string) {
 }
 
 /**
- * A delegator's way to the chats under it: the navbar's button, just left of
- * the widgets toggle, on a delegator and nowhere else. It opens the list in
- * the viewer's pane and shuts the pane again, and counts the chats under the
- * delegator that want the user, pane open or not.
+ * A delegator's way to its tickets: the navbar's button, just left of the
+ * widgets toggle, on a delegator and nowhere else. It opens them in the
+ * viewer's pane and shuts the pane again, and counts the tickets that want
+ * the user, pane open or not. A to-do list, for what it opens, and not the
+ * compass: the title beside it is the delegator's, and says what it is.
  *
  * One control at every width. Beside the chat it is a toggle among the
  * navbar's other plain icon buttons, lit while the pane is open as the
@@ -56,7 +57,7 @@ export function DelegatedListButton({ chatId, overlay }: { chatId: string; overl
   const count = boardCount ?? sidebarCount
   const open = useRightSidebarStore((store) => Boolean(store.chatViewers[chatId]))
   const pressed = open && !overlay
-  const action = pressed ? "Hide the board" : "Show the board"
+  const action = pressed ? "Hide tickets" : "Show tickets"
   const label = count > 0 ? `${action}, ${count} ${count === 1 ? "wants" : "want"} you` : action
   return (
     <Tooltip>
@@ -73,7 +74,7 @@ export function DelegatedListButton({ chatId, overlay }: { chatId: string; overl
             overlay ? "text-logo hover:text-logo" : pressed && "text-foreground",
           )}
         >
-          <DelegatorIcon strokeWidth={2} className="h-4 shrink-0 max-md:h-5 max-md:w-5" />
+          <ListTodo strokeWidth={2} className="h-4 shrink-0 max-md:h-5 max-md:w-5" />
           {count > 0 ? (
             <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-[5px] bg-foreground/10 px-1 text-xs font-bold leading-none text-foreground tabular-nums">
               {count}

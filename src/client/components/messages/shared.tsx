@@ -115,6 +115,14 @@ export function MetaRow({ children, className, ...props }: ComponentPropsWithout
   )
 }
 
+/**
+ * The 20px slot a tool row's mark sits in, its 16px icon centred: the row
+ * ToolCallMessage draws, a report's line, a ticket's history.
+ */
+export function MetaIconSlot({ children }: { children: ReactNode }) {
+  return <div className="w-5 h-5 relative flex shrink-0 items-center justify-center">{children}</div>
+}
+
 // Content row with consistent text styling
 export function MetaContent({ children, className }: { children: ReactNode; className?: string }) {
   return (

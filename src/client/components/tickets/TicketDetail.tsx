@@ -1,166 +1,241 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { useState, type ReactNode, type Ref } from "react"
 import * as PopoverPrimitive from "@radix-ui/react-popover"
-import { ArrowUp, CircleCheck, Ellipsis, Link, Mail, RotateCcw, User } from "lucide-react"
+import { Check, CircleCheck, CircleHelp, Ellipsis, Link, Mail, PencilLine, RotateCcw, X } from "lucide-react"
 import { displayAttachments } from "../../../shared/display-tools"
-import type { TicketChatLink, TicketDetail, TicketReply, TicketSummary } from "../../../shared/tickets"
+import type { TicketDetail, TicketHistoryEvent } from "../../../shared/tickets"
+import type { AgentProvider, ChatAttachment, ChatSkillsSnapshot, ModelOptions, ProviderCatalogEntry } from "../../../shared/types"
 import { readVisualizationArtifact } from "../../../shared/visualization"
 import { FOCUS_FALLBACK_IGNORE_ATTRIBUTE } from "../../app/chatFocusPolicy"
-import { formatTicketTime, TICKET_STATE_LABELS, type TicketActivityRow } from "../../lib/tickets"
+import { handoffStateLabel, ticketDraftKey, ticketRepliesLabel, type TicketActivityBlock } from "../../lib/tickets"
 import { cn } from "../../lib/utils"
-import { DelegatorIcon } from "../chat-ui/delegator-icon"
+import { useChatReferenceActions, useSidebarThread } from "../chat-ui/chat-reference"
+import { chatOpenMenuItems } from "../chat-ui/ChatOpenMenuItems"
+import { ChatInput, type ChatInputHandle } from "../chat-ui/ChatInput"
+import { TEXT_LINE_SLOT_CLASS } from "../chat-ui/StatusMark"
+import { ThreadRowMenu } from "../chat-ui/sidebar/ThreadRow"
 import { AttachmentsCard } from "../messages/DisplayToolMessage"
-import { TranscriptMarkdown } from "../messages/shared"
-import { UserMessageAttachments } from "../messages/UserMessage"
+import { formatPromptBoundary, TimeBoundary } from "../messages/ResultMessage"
+import { MetaIconSlot, MetaLabel, MetaRow } from "../messages/shared"
+import { AssistantText } from "../messages/TextMessage"
+import { TRANSCRIPT_ROW_CLASS } from "../messages/transcript-row"
+import { UserMessage } from "../messages/UserMessage"
 import { Visualization } from "../messages/Visualization"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 import { TicketChatMark, TicketMark } from "./TicketMark"
 
+/** What a reply carries besides its words: its files, and the composer's settings for the turn it starts. */
+export interface TicketReplyOptions {
+  attachments: ChatAttachment[]
+  provider?: AgentProvider
+  model?: string
+  modelOptions?: ModelOptions
+  planMode?: boolean
+  autoPlan?: boolean
+}
+
 /**
- * One ticket, as the pane shows it under its breadcrumb: title, how it
- * stands and who is on it, what the work is, then everything that happened,
- * oldest first, and a composer to reply. Drawn from props; `TicketView` is
- * what subscribes and sends.
+ * One ticket, as the pane shows it under its breadcrumb: its mark and title,
+ * the chats on it, what the work is, then everything that happened, oldest
+ * first, and a composer to reply. Drawn from props; `TicketView` is what
+ * subscribes and sends.
+ *
+ * Below the body it is a chat transcript, drawn by the transcript's own
+ * parts, so it reads as one: the user's replies are their bubbles
+ * (`UserMessage`), the delegator's are an agent's text (`AssistantText`),
+ * and history is tool rows, a hand-off one row that keeps up with its chat,
+ * each in a transcript row's box.
  */
 
-/** A new line in the activity rises 4px into place. Not on the first paint, and not under reduced motion. */
-const ARRIVE_CLASS = "transition-[opacity,translate] duration-200 ease-snappy starting:translate-y-1 starting:opacity-0 motion-reduce:transition-none"
 
-/** The status pill: the ticket's mark and the name of its column. */
-export function TicketStatusPill({ ticket }: { ticket: Pick<TicketSummary, "id" | "state" | "unread"> }) {
+/** The ticket's mark and its title, as a chat row puts its mark before its title. */
+export function TicketTitle({ ticket }: { ticket: Pick<TicketDetail, "id" | "state" | "unread" | "title"> }) {
   return (
-    <span className="inline-flex h-6 items-center gap-[5px] rounded-[7px] border border-border pl-[5px] pr-[9px] text-xs font-medium">
-      <TicketMark ticket={ticket} />
-      {TICKET_STATE_LABELS[ticket.state]}
+    // Top-aligned, and the mark centred on the title's first line: a title
+    // that wraps keeps its mark by its first words.
+    <div className="flex items-start gap-[9px] text-lg leading-[1.3]">
+      <span className={TEXT_LINE_SLOT_CLASS}><TicketMark ticket={ticket} /></span>
+      <h2 className="min-w-0 font-semibold tracking-[-0.01em] text-foreground">{ticket.title}</h2>
+    </div>
+  )
+}
+
+/**
+ * A history line as a tool row (ToolCallMessage's): its mark in the 20px
+ * slot and the words, and no time, as a tool row has none: the rule over
+ * the turn dates it. A line that names a chat opens it in the previewer, as
+ * the chat's row in the header does, with the tool row's hover and a press.
+ */
+function ActivityLine({ icon, label, detail, onOpen }: {
+  icon: ReactNode
+  label: string
+  /** Quieter, after the words: how a hand-off stands. */
+  detail?: string
+  onOpen?: () => void
+}) {
+  const content = (
+    <span className="grid min-w-0 grid-cols-[auto_1fr] items-center gap-1.5 text-sm">
+      <MetaIconSlot>{icon}</MetaIconSlot>
+      <span className="flex min-w-0 items-baseline gap-2">
+        <MetaLabel className="min-w-0 truncate text-left">{label}</MetaLabel>
+        {detail ? <span className="shrink-0 text-xs text-muted-foreground">{detail}</span> : null}
+      </span>
     </span>
   )
-}
-
-/** A chat on the ticket. A click opens it the way a chat link does, in the previewer. */
-export function TicketChatChip({ link, title, onOpen }: { link: TicketChatLink; title: string; onOpen: (chatId: string) => void }) {
+  if (!onOpen) return <MetaRow className="w-full">{content}</MetaRow>
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(link.chatId)}
-      // The middle button, which opening a chat reads as "in a tab".
-      onAuxClick={(event) => { if (event.button === 1) onOpen(link.chatId) }}
-      className={cn(
-        "inline-flex h-6 min-w-0 max-w-full items-center gap-[5px] rounded-[7px] border border-border pl-1 pr-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        "transition-[scale,background-color] duration-150 ease-snappy active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100 pointer-hover:bg-muted",
-      )}
-    >
-      <TicketChatMark link={link} />
-      <span className="min-w-0 truncate">{title}</span>
-    </button>
+    <MetaRow className="w-full">
+      <button
+        type="button"
+        onClick={onOpen}
+        // The middle button, which opening a chat reads as "in a tab".
+        onAuxClick={(event) => { if (event.button === 1) onOpen() }}
+        className="min-w-0 max-w-full cursor-pointer rounded-md outline-none transition-[opacity,scale] duration-150 ease-snappy hover:opacity-60 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.985] motion-reduce:transition-none motion-reduce:active:scale-100"
+      >
+        {content}
+      </button>
+    </MetaRow>
   )
 }
 
-/** What a reply carries besides its words: the delegator's visualizations and files, the user's attachments. */
-function ReplyArtifacts({ reply }: { reply: TicketReply }) {
+/**
+ * A hand-off, as one row that keeps up with the chat it went to: the chat's
+ * live mark or its harness logo (an X once it failed), its title, and how it
+ * stands. The one place on the ticket a chat is shown, so it carries the
+ * chat's own right-click menu, as a chat's card in a transcript does.
+ */
+function HandoffRow({ block, title, onOpen }: {
+  block: Extract<TicketActivityBlock, { type: "handoff" }>
+  title: string
+  onOpen: (chatId: string) => void
+}) {
+  const thread = useSidebarThread(block.chatId)
+  const actions = useChatReferenceActions()
+  const icon = block.state === "failed"
+    ? <X className="size-4 text-destructive" />
+    // A tool row's icon is 16px; the chat's logo is one here too.
+    : <TicketChatMark link={{ chatId: block.chatId, state: block.state }} harnessClassName="size-4 text-muted-icon" />
+  const line = (
+    <ActivityLine
+      icon={icon}
+      label={thread?.title ?? title}
+      detail={handoffStateLabel(block.state)}
+      onOpen={() => onOpen(block.chatId)}
+    />
+  )
+  if (!thread || !actions) return line
+  return (
+    <ThreadRowMenu
+      thread={thread}
+      archived={thread.archived}
+      editorLabel={actions.editorLabel}
+      {...actions.menu}
+      leadingItems={chatOpenMenuItems(thread, actions)}
+    >
+      <div>{line}</div>
+    </ThreadRowMenu>
+  )
+}
+
+/** The mark of a history line that is not a hand-off. */
+function eventIcon(kind: TicketHistoryEvent["kind"]): ReactNode {
+  switch (kind) {
+    case "chat_failed": return <X className="size-4 text-destructive" />
+    case "chat_asking": return <CircleHelp className="size-4 text-muted-icon" />
+    case "closed": return <CircleCheck className="size-4 text-muted-icon" />
+    case "reopened": return <RotateCcw className="size-4 text-muted-icon" />
+    case "renamed": return <PencilLine className="size-4 text-muted-icon" />
+    case "sent_to":
+    case "chat_finished": return <Check className="size-4 text-muted-icon" />
+  }
+}
+
+/**
+ * The rows a reply is in the transcript's terms. The user's: their bubble,
+ * with its attachments over it. The delegator's: its text,
+ * then each visualization and set of files as rows of their own, as
+ * `show_visualization` and `send_attachments` draw in a chat.
+ */
+function replyRows(block: Extract<TicketActivityBlock, { type: "user" | "delegator" }>): Array<{ key: string; node: ReactNode }> {
+  const { reply } = block
+  if (block.type === "user") {
+    return [{ key: reply.id, node: <UserMessage content={reply.text} attachments={reply.attachments} /> }]
+  }
   const artifacts = reply.artifacts ?? []
   const visualizations = artifacts.flatMap((artifact) => {
     const read = readVisualizationArtifact([artifact])
     return read ? [read] : []
   })
   const files = displayAttachments(artifacts)
-  return (
-    <>
-      {/* At the pane's width, with its own way to full size, as in a transcript. */}
-      {visualizations.map((artifact) => (
-        <div key={artifact.url} className="mt-1 overflow-hidden rounded-xl border border-border">
-          <Visualization artifact={artifact} />
-        </div>
-      ))}
-      {files.length > 0 ? <div className="mt-1"><AttachmentsCard attachments={files} /></div> : null}
-      {reply.attachments && reply.attachments.length > 0 ? (
-        <div className="mt-1 flex flex-col items-start gap-2"><UserMessageAttachments attachments={reply.attachments} align="start" /></div>
-      ) : null}
-    </>
-  )
+  const rows: Array<{ key: string; node: ReactNode }> = []
+  if (reply.text.trim()) rows.push({ key: reply.id, node: <AssistantText text={reply.text} /> })
+  for (const artifact of visualizations) rows.push({ key: `${reply.id}:${artifact.url}`, node: <Visualization key={artifact.url} artifact={artifact} /> })
+  if (files.length > 0) rows.push({ key: `${reply.id}:files`, node: <AttachmentsCard attachments={files} /> })
+  if (rows.length === 0) rows.push({ key: reply.id, node: null })
+  // Nothing is drawn to say a reply asks the user something, as nothing is
+  // under an agent's question in a chat: the words say it, and the ticket's
+  // mark (Waiting on you) says it is waiting.
+  return rows
 }
 
-/** A reply, whole: who, when, the markdown, what it carries, and whether it asks the user. */
-function TicketReplyRow({ reply, delegatorName, nowMs, arrives }: { reply: TicketReply; delegatorName: string; nowMs: number; arrives: boolean }) {
-  const mine = reply.author === "user"
+/**
+ * The activity, as transcript rows (`ticketActivityBlocks`), each in a
+ * transcript row's box and at the transcript's inset (its 12px, the row's
+ * 8px), so the rhythm and the column are the chat's. New rows arrive as a
+ * chat's do: in place, with no entrance of their own.
+ */
+export function TicketActivity({ blocks, chatTitle, onOpenChat }: {
+  blocks: readonly TicketActivityBlock[]
+  chatTitle: (chatId: string) => string
+  onOpenChat: (chatId: string) => void
+}) {
+  const box = (key: string, node: ReactNode) => <div key={key} className={TRANSCRIPT_ROW_CLASS}>{node}</div>
   return (
-    <div className={cn("flex gap-2.5", arrives && ARRIVE_CLASS)}>
-      <span
-        aria-hidden
-        className={cn(
-          "flex size-6 shrink-0 items-center justify-center rounded-[7px]",
-          mine ? "bg-purple-500/20 text-purple-600 dark:text-purple-400" : "bg-logo/15 text-logo",
-        )}
-      >
-        {mine ? <User className="size-3.5" /> : <DelegatorIcon className="size-[13px]" />}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-[3px] text-sm leading-[1.45]">
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-[13px] font-semibold">{mine ? "You" : delegatorName}</span>
-          <span className="text-xs tabular-nums text-muted-foreground">{formatTicketTime(reply.createdAt, nowMs)}</span>
-        </div>
-        <div className="prose prose-sm max-w-full text-pretty dark:prose-invert">
-          <TranscriptMarkdown text={reply.text} />
-        </div>
-        <ReplyArtifacts reply={reply} />
-        {reply.asksUser ? (
-          <span className="inline-flex h-5 w-fit items-center rounded-md bg-blue-400/15 px-[7px] text-xs font-medium text-blue-600 dark:text-blue-400">
-            Asks you
-          </span>
-        ) : null}
-      </div>
+    <div className="px-3 pb-2 pt-2">
+      {blocks.flatMap((block) => {
+        if (block.type === "divider") {
+          return [box(block.key, <TimeBoundary label={formatPromptBoundary(new Date(block.at).toISOString())} />)]
+        }
+        if (block.type === "handoff") {
+          return [box(block.key, <HandoffRow block={block} title={chatTitle(block.chatId)} onOpen={onOpenChat} />)]
+        }
+        if (block.type === "event") {
+          const { chatId } = block
+          return [box(block.key, (
+            <ActivityLine icon={eventIcon(block.kind)} label={block.text} onOpen={chatId ? () => onOpenChat(chatId) : undefined} />
+          ))]
+        }
+        return replyRows(block).map((row) => box(row.key, row.node))
+      })}
     </div>
   )
 }
 
 /**
- * The activity. History lines are quiet: no icon, indented to where a
- * reply's text starts (its 24px avatar and the 10px after it), so they read
- * as notes between the replies and not as more of them.
+ * The ticket's head: its mark and title, then the body, and under it, where
+ * the conversation starts, the transcript's own
+ * rule, saying how many replies there are (`ticketRepliesLabel`). Live: the
+ * count is of the replies the ticket has as pushed.
  */
-export function TicketActivity({ rows, delegatorName, nowMs, arrivingKeys }: {
-  rows: readonly TicketActivityRow[]
-  delegatorName: string
-  nowMs: number
-  /** Rows that arrived while the ticket was open: they animate in. */
-  arrivingKeys: ReadonlySet<string>
-}) {
-  return (
-    <div className="flex flex-col gap-2.5">
-      {rows.map((row) => row.type === "reply" ? (
-        <TicketReplyRow key={row.key} reply={row.reply} delegatorName={delegatorName} nowMs={nowMs} arrives={arrivingKeys.has(row.key)} />
-      ) : (
-        <div key={row.key} className={cn("flex items-baseline gap-2 pl-[34px] text-xs text-muted-foreground", arrivingKeys.has(row.key) && ARRIVE_CLASS)}>
-          <span className="min-w-0">{row.text}</span>
-          <span className="shrink-0 tabular-nums">{formatTicketTime(row.at, nowMs)}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-export function TicketDetailBody({ ticket, chatTitle, onOpenChat, activity }: {
+export function TicketDetailBody({ ticket, activity }: {
   ticket: TicketDetail
-  chatTitle: (link: TicketChatLink) => string
-  onOpenChat: (chatId: string) => void
   activity: ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-3 px-4 py-3.5">
-      <h2 className="text-lg font-semibold leading-tight tracking-[-0.01em] text-foreground">{ticket.title}</h2>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <TicketStatusPill ticket={ticket} />
-        {ticket.chats.map((link) => <TicketChatChip key={link.chatId} link={link} title={chatTitle(link)} onOpen={onOpenChat} />)}
+    <>
+      {/* The transcript's 20px inset, so the title, the body and the activity share one column. */}
+      <div className="px-5 pb-1 pt-3.5">
+        <TicketTitle ticket={ticket} />
       </div>
-      {ticket.body.trim() ? (
-        <div className="text-sm leading-normal">
-          <div className="prose prose-sm max-w-full text-pretty dark:prose-invert">
-            <TranscriptMarkdown text={ticket.body} />
-          </div>
-          {ticket.bodyEditedAt !== undefined ? <span className="text-xs text-muted-foreground">Edited</span> : null}
-        </div>
-      ) : null}
-      <h3 className="pt-0.5 text-xs font-semibold text-muted-foreground">Activity</h3>
+      <div className="px-5 pb-1.5 pt-1.5">
+        {/* An agent's text, as the transcript draws one: the same prose, and the same markdown. */}
+        {ticket.body.trim() ? <AssistantText text={ticket.body} /> : null}
+      </div>
+      {/* In a transcript row's box at the activity's inset, as the rules between its turns are. */}
+      <div className="px-3">
+        <div className={TRANSCRIPT_ROW_CLASS}><TimeBoundary label={ticketRepliesLabel(ticket.replies.length)} /></div>
+      </div>
       {activity}
-    </div>
+    </>
   )
 }
 
@@ -223,67 +298,61 @@ export function TicketMenu({ done, onSetStatus, onMarkUnread, onCopyLink }: {
   )
 }
 
-const COMPOSER_MAX_HEIGHT_PX = 160
-
 /**
- * "Reply…" at the foot of the ticket. Enter sends and Shift+Enter breaks the
- * line, as in the chat's composer. What is sent goes on the ticket and on to
- * the delegator, so the field empties only once the server has taken it.
+ * "Reply…" at the foot of the ticket: the delegator chat's own composer,
+ * options row and all, since a reply is a message to that chat and starts a
+ * turn of it. Its settings (harness, model, mode, effort, fast mode,
+ * context window) are that chat's: they are kept by chat id, and this
+ * composer is given the delegator's, so a change here is a change there and
+ * the other way round. Only the draft is the ticket's own (`ticketDraftKey`).
+ *
+ * Files upload to the delegator's project as a chat's do. The reply goes on
+ * `ticket.reply` with the attachments and the settings, and the server runs
+ * the delegator's turn with them, steered in or queued. The composer keeps
+ * what was typed if the send fails.
  */
-export function TicketComposer({ onSend }: { onSend: (text: string) => Promise<void> }) {
-  const [text, setText] = useState("")
-  const [sending, setSending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const fieldRef = useRef<HTMLTextAreaElement | null>(null)
-
-  // Grows with what is typed, to a limit, then scrolls.
-  useLayoutEffect(() => {
-    const field = fieldRef.current
-    if (!field) return
-    field.style.height = "auto"
-    field.style.height = `${Math.min(field.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`
-  }, [text])
-
-  const canSend = text.trim().length > 0 && !sending
-  const send = () => {
-    if (!canSend) return
-    setSending(true)
-    setError(null)
-    onSend(text.trim())
-      .then(() => setText(""))
-      .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : String(caught)))
-      .finally(() => setSending(false))
-  }
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return
-    event.preventDefault()
-    send()
-  }
-
+export function TicketComposer({ delegatorChatId, ticketId, projectId, projectPath, provider, availableProviders, onSend, onListSkills, previousPrompt, composerRef }: {
+  delegatorChatId: string
+  ticketId: string
+  projectId: string | null
+  projectPath: string | null
+  provider: AgentProvider | null
+  availableProviders: ProviderCatalogEntry[]
+  onSend: (text: string, options: TicketReplyOptions) => Promise<void>
+  /** The delegator's skills, for the "/" menu: its harness is the one the reply reaches. */
+  onListSkills: (provider: AgentProvider) => Promise<ChatSkillsSnapshot>
+  /** The user's last reply on this ticket, for Arrow Up to bring back. */
+  previousPrompt: string | null
+  /** For files dropped anywhere on the ticket. */
+  composerRef?: Ref<ChatInputHandle>
+}) {
   return (
-    <div className="shrink-0 border-t border-border px-2.5 pb-2.5 pt-2">
-      {error ? <p role="alert" className="px-1 pb-1.5 text-xs text-destructive">{error}</p> : null}
-      <div className="flex items-end gap-2 rounded-xl border border-border bg-card py-[5px] pl-3.5 pr-[5px] focus-within:border-blue-500 focus-within:ring-3 focus-within:ring-blue-500/20">
-        <textarea
-          ref={fieldRef}
-          value={text}
-          rows={1}
-          placeholder="Reply…"
-          aria-label="Reply on the ticket"
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={onKeyDown}
-          className="min-h-[30px] min-w-0 flex-1 resize-none bg-transparent py-[5px] text-sm leading-5 outline-none placeholder:text-muted-foreground"
-        />
-        <button
-          type="button"
-          aria-label="Send reply"
-          disabled={!canSend}
-          onClick={send}
-          className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-[scale,opacity] duration-150 ease-snappy active:scale-[0.94] disabled:opacity-40 disabled:active:scale-100 motion-reduce:transition-none"
-        >
-          <ArrowUp className="size-4" />
-        </button>
-      </div>
+    // The options row's own padding is the gap under it, as on the chat's page.
+    <div className="shrink-0 border-t border-border pt-2.5">
+      <ChatInput
+        ref={composerRef}
+        chatId={delegatorChatId}
+        draftKey={ticketDraftKey(delegatorChatId, ticketId)}
+        // Beside the chat's own composer: it does not take focus on mount,
+        // and leaves the command palette's Attach Files to the chat.
+        secondary
+        placeholder="Reply…"
+        disabled={!projectId}
+        projectId={projectId}
+        projectPath={projectPath}
+        activeProvider={provider}
+        availableProviders={availableProviders}
+        onListSkills={onListSkills}
+        previousPrompt={previousPrompt}
+        onSubmit={(value, options) => onSend(value, {
+          attachments: options?.attachments ?? [],
+          provider: options?.provider,
+          model: options?.model,
+          modelOptions: options?.modelOptions,
+          planMode: options?.planMode,
+          autoPlan: options?.autoPlan,
+        })}
+      />
     </div>
   )
 }

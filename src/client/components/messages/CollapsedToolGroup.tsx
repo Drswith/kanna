@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, type ReactNode } from "react"
 import { ChevronRight } from "lucide-react"
 import { ToolCallMessage } from "./ToolCallMessage"
 import { useToolPayloadPrefetch } from "./tool-payload-context"
@@ -91,11 +91,47 @@ export function CollapsedToolGroup({ messages, isLoading, localPath, expanded, o
   }
 
   return (
-    <MetaRow className="w-full" onPointerEnter={prefetchGroupPayloads}>
+    <CollapsedGroup
+      label={label}
+      loading={showLoadingState}
+      count={messages.length}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+      onPointerEnter={prefetchGroupPayloads}
+    >
+      {messages.map(msg => (
+        <ToolCallMessage
+          key={msg.id}
+          message={msg as ProcessedToolCall}
+          isLoading={isLoading}
+          localPath={localPath}
+        />
+      ))}
+    </CollapsedGroup>
+  )
+}
+
+/**
+ * A run of rows folded into one line, "3 reads, 2 edits", with the chevron
+ * that opens it. `count` is how many rows it holds; past five, a second
+ * Collapse closes it from the bottom.
+ */
+export function CollapsedGroup({ label, loading = false, count, expanded, onExpandedChange, onPointerEnter, children }: {
+  label: ReactNode
+  loading?: boolean
+  count: number
+  expanded: boolean
+  onExpandedChange: (next: boolean) => void
+  onPointerEnter?: () => void
+  children: ReactNode
+}) {
+  return (
+    <MetaRow className="w-full" onPointerEnter={onPointerEnter}>
       <div className="flex flex-col w-full">
         <button
           onClick={() => onExpandedChange(!expanded)}
-          className={`group cursor-pointer grid grid-cols-[auto_1fr] items-center gap-1 text-sm ${!expanded && !showLoadingState ? "hover:opacity-60 transition-opacity" : ""}`}
+          aria-expanded={expanded}
+          className={`group cursor-pointer grid grid-cols-[auto_1fr] items-center gap-1 text-sm ${!expanded && !loading ? "hover:opacity-60 transition-opacity" : ""}`}
         >
           <div className="grid grid-cols-[auto_1fr] items-center gap-1.5">
             <div className="w-5 h-5 relative flex items-center justify-center">
@@ -104,21 +140,14 @@ export function CollapsedToolGroup({ messages, isLoading, localPath, expanded, o
               />
             </div>
             <MetaLabel className="text-left">
-              <AnimatedShinyText animate={showLoadingState}>{label}</AnimatedShinyText>
+              <AnimatedShinyText animate={loading}>{label}</AnimatedShinyText>
             </MetaLabel>
           </div>
         </button>
         {expanded && (
           <div className="my-4 flex flex-col gap-3">
-            {messages.map(msg => (
-              <ToolCallMessage
-                key={msg.id}
-                message={msg as ProcessedToolCall}
-                isLoading={isLoading}
-                localPath={localPath}
-              />
-            ))}
-            {messages.length > 5 && (
+            {children}
+            {count > 5 && (
               <button
                 onClick={() => onExpandedChange(false)}
                 className="cursor-pointer grid grid-cols-[auto_1fr] items-center gap-1 text-xs hover:opacity-80 transition-opacity"

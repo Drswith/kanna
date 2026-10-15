@@ -13,6 +13,7 @@ import { QueuedUserMessage } from "../../components/messages/QueuedUserMessage"
 import { messageNamingParent, ParentChatLink } from "../../components/messages/ParentChatLink"
 import { ReplyQuoteProjectContext } from "../../components/messages/ChatToolMessage"
 import { TicketTranscriptProvider } from "../../components/tickets/ticket-transcript"
+import { TRANSCRIPT_ROW_CLASS } from "../../components/messages/transcript-row"
 import { useParentChatId, useProjectIdForChat } from "../../stores/sidebarStore"
 import { OpenLocalLinkProvider, type OpenLocalLinkTarget } from "../../components/messages/shared"
 import { ProcessingMessage } from "../../components/messages/ProcessingMessage"
@@ -180,7 +181,7 @@ const TranscriptRowItem = memo(function TranscriptRowItem({
           padding to keep the text column itself at 800px. */}
       <div
         className={cn(
-          "mx-auto mb-1 w-full max-w-[816px] rounded-xl p-2",
+          TRANSCRIPT_ROW_CLASS,
           flashBox && "kanna-jump-flash",
         )}
         data-transcript-row-id={row.id}

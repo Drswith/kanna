@@ -1,19 +1,23 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react"
 import { ChevronLeft } from "lucide-react"
-import type { TicketChatLink, TicketDetail } from "../../../shared/tickets"
+import type { TicketDetail } from "../../../shared/tickets"
+import type { AgentProvider, ChatSkillsSnapshot } from "../../../shared/types"
+import type { ChatInputHandle } from "../../components/chat-ui/ChatInput"
 import { useSidebarThread } from "../../components/chat-ui/chat-reference"
-import { TicketActivity, TicketComposer, TicketDetailBody, TicketMenu, TicketStatusPill } from "../../components/tickets/TicketDetail"
-import { useTicketClock } from "../../components/tickets/useTicketClock"
+import { TicketActivity, TicketComposer, type TicketReplyOptions, TicketDetailBody, TicketMenu, TicketTitle } from "../../components/tickets/TicketDetail"
 import { ViewerIconButton, ViewerSurface } from "../../components/viewer/ViewerSurface"
 import { copyTextToClipboard } from "../../lib/clipboard"
 import { delegatorDisplayTitle } from "../../lib/delegators"
-import { collapseTicketActivity, ticketLinkPath } from "../../lib/tickets"
+import { snapshotDroppedFiles } from "../../lib/snapshotDroppedFiles"
+import { adjacentTicketId, ticketActivityBlocks, ticketLinkPath, ticketReplyCommand, ticketStepOrder } from "../../lib/tickets"
 import { useStableSidebarThreads } from "../useStableSidebarThreads"
 import { useSidebarStore } from "../../stores/sidebarStore"
-import { useTicketSummary } from "../../stores/ticketBoardStore"
+import { useTicketBoard, useTicketSummary } from "../../stores/ticketBoardStore"
 import { useViewerStore, type ViewerItem } from "../../stores/viewerStore"
+import type { ViewerNavigation } from "../../components/viewer/ViewerSurface"
 import { useOpenChat } from "../useOpenChat"
 import type { ChatPreviewContext } from "./ChatPreview"
+import { hasFileDragTypes } from "./utils"
 
 type TicketItem = Extract<ViewerItem, { kind: "ticket" }>
 
@@ -41,7 +45,6 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
   const delegatorName = delegatorDisplayTitle(delegator?.title ?? "")
   const threads = useStableSidebarThreads(useSidebarStore((store) => store.data))
   const titles = useMemo(() => new Map(threads.map((thread) => [thread.chatId, thread.title])), [threads])
-  const chatTitle = useCallback((link: Pick<TicketChatLink, "chatId" | "title">) => titles.get(link.chatId) ?? link.title, [titles])
   const linkTitles = useMemo(() => new Map((detail?.chats ?? []).map((link) => [link.chatId, link.title])), [detail?.chats])
   const nameOfChat = useCallback((id: string) => titles.get(id) ?? linkTitles.get(id) ?? "A chat", [linkTitles, titles])
 
@@ -55,22 +58,10 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
     void socket.command({ type: "ticket.markRead", chatId, ticketId }).catch(() => {})
   }, [chatId, socket, ticketId, unread, updatedAt])
 
-  const rows = useMemo(
-    () => (detail ? collapseTicketActivity(detail, { chat: nameOfChat, delegator: delegatorName }) : []),
+  const blocks = useMemo(
+    () => (detail ? ticketActivityBlocks(detail, { chat: nameOfChat, delegator: delegatorName }) : []),
     [delegatorName, detail, nameOfChat],
   )
-  // What was there when the ticket first drew stays still. What arrives
-  // after rises in, unless it is the reply just sent from the keyboard.
-  const firstKeysRef = useRef<Set<string> | null>(null)
-  if (detail && firstKeysRef.current === null) firstKeysRef.current = new Set(rows.map((row) => row.key))
-  const sentByKeyRef = useRef(false)
-  const arrivingKeys = useMemo(() => {
-    const first = firstKeysRef.current
-    if (!first) return new Set<string>()
-    return new Set(rows
-      .filter((row) => !first.has(row.key) && !(sentByKeyRef.current && row.type === "reply" && row.reply.author === "user"))
-      .map((row) => row.key))
-  }, [rows])
 
   // Opened at the latest, as a conversation is, and kept there as it grows
   // while the reader is there.
@@ -79,18 +70,70 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
   useLayoutEffect(() => {
     const scroller = scrollRef.current
     if (scroller && stuckRef.current) scroller.scrollTop = scroller.scrollHeight
-  }, [rows])
+  }, [blocks])
 
   const stepBack = useViewerStore((store) => store.stepBack)
-  const now = useTicketClock()
+
+  // The ↑ and ↓ in the header, and k and j, through the board in its order.
+  // Each step puts the next ticket where this one is, as a new card (the view
+  // is keyed by ticket): it opens at its latest, is read on opening, and
+  // adds no level, so Back still goes to the list. A step from the keyboard
+  // lands at once (`changedByKey`); from a button, the body only fades.
+  const board = useTicketBoard(chatId)
+  const navigation = useMemo<ViewerNavigation | undefined>(() => {
+    const order = board ? ticketStepOrder(board.tickets) : []
+    const index = order.indexOf(ticketId)
+    if (index < 0) return undefined
+    const previous = adjacentTicketId(order, ticketId, "previous")
+    const next = adjacentTicketId(order, ticketId, "next")
+    const go = (id: string | null) => () => {
+      if (id) useViewerStore.getState().open({ kind: "ticket", chatId, ticketId: id })
+    }
+    return {
+      index,
+      count: order.length,
+      onPrevious: go(previous),
+      onNext: go(next),
+      previousLabel: "Previous ticket · K",
+      nextLabel: "Next ticket · J",
+      hasPrevious: previous !== null,
+      hasNext: next !== null,
+    }
+  }, [board, chatId, ticketId])
   const shown = detail ?? null
   const head = shown ?? summary
 
-  const reply = useCallback(async (text: string) => {
-    sentByKeyRef.current = window.event instanceof KeyboardEvent
+  const reply = useCallback(async (text: string, { attachments, ...run }: TicketReplyOptions) => {
     stuckRef.current = true
-    await socket.command({ type: "ticket.reply", chatId, ticketId, text })
+    await socket.command(ticketReplyCommand(chatId, ticketId, text, attachments, run))
   }, [chatId, socket, ticketId])
+
+  // The "/" menu lists what the delegator's harness can run, since that is
+  // where the reply goes, as a chat's composer lists its own chat's.
+  const projectId = delegator?.projectId ?? null
+  const listSkills = useCallback(
+    (provider: AgentProvider) => socket.command<ChatSkillsSnapshot>({ type: "chat.listSkills", provider, chatId, projectId: projectId ?? undefined }),
+    [chatId, projectId, socket],
+  )
+  const previousReply = useMemo(
+    () => [...(detail?.replies ?? [])].reverse().find((candidate) => candidate.author === "user" && candidate.text.trim())?.text ?? null,
+    [detail?.replies],
+  )
+
+  // Files dropped anywhere on the ticket go to its composer. Handled here,
+  // as a previewed chat does: the page's own drop target is the main chat's
+  // card, and a drop nothing takes makes the browser open the file.
+  const composerRef = useRef<ChatInputHandle | null>(null)
+  const handleDragOver = useCallback((event: DragEvent) => {
+    if (!hasFileDragTypes(event.dataTransfer?.types ?? [])) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = "copy"
+  }, [])
+  const handleDrop = useCallback((event: DragEvent) => {
+    if (!hasFileDragTypes(event.dataTransfer?.types ?? [])) return
+    event.preventDefault()
+    void snapshotDroppedFiles([...event.dataTransfer.files]).then((files) => composerRef.current?.enqueueFiles(files))
+  }, [])
   const setStatus = useCallback((status: "done" | "open") => {
     void socket.command({ type: "ticket.setStatus", chatId, ticketId, status }).catch(() => {})
   }, [chatId, socket, ticketId])
@@ -108,10 +151,11 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
   return (
     <ViewerSurface
       label={head ? `Ticket ${number}, ${head.title}` : "Ticket"}
-      leading={<ViewerIconButton label="Back to the board (Esc)" onClick={stepBack}><ChevronLeft /></ViewerIconButton>}
+      navigation={navigation}
+      leading={<ViewerIconButton label="Back to tickets (Esc)" onClick={stepBack}><ChevronLeft /></ViewerIconButton>}
       title={(
         <span className="flex min-w-0 items-center gap-1.5">
-          <button type="button" onClick={stepBack} className="shrink-0 font-normal text-muted-foreground outline-none focus-visible:underline pointer-hover:text-foreground">Board</button>
+          <button type="button" onClick={stepBack} className="shrink-0 font-normal text-muted-foreground outline-none focus-visible:underline pointer-hover:text-foreground">Tickets</button>
           <span aria-hidden className="text-muted-foreground">/</span>
           <span className="font-semibold tabular-nums">{number}</span>
         </span>
@@ -127,6 +171,7 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
       onClose={onClose}
       bodyClassName="flex flex-col overflow-hidden"
     >
+      <div className="flex min-h-0 flex-1 flex-col" onDragOver={handleDragOver} onDrop={handleDrop}>
       <div
         ref={scrollRef}
         onScroll={(event) => {
@@ -138,21 +183,30 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
         {shown ? (
           <TicketDetailBody
             ticket={shown}
-            chatTitle={chatTitle}
-            onOpenChat={(id) => openChat(id, { from: "preview" })}
-            activity={<TicketActivity rows={rows} delegatorName={delegatorName} nowMs={now} arrivingKeys={arrivingKeys} />}
+            activity={<TicketActivity blocks={blocks} chatTitle={nameOfChat} onOpenChat={(id) => openChat(id, { from: "preview" })} />}
           />
         ) : summary ? (
           // The board's row, until the ticket itself arrives.
-          <div className="flex flex-col gap-3 px-4 py-3.5">
-            <h2 className="text-lg font-semibold leading-tight tracking-[-0.01em]">{summary.title}</h2>
-            <div className="flex"><TicketStatusPill ticket={summary} /></div>
-          </div>
+          <div className="px-5 pb-1 pt-3.5"><TicketTitle ticket={summary} /></div>
         ) : detail === null ? (
-          <p className="px-4 py-6 text-sm text-muted-foreground">This ticket is not on the board any more.</p>
+          <p className="px-4 py-6 text-sm text-muted-foreground">This ticket is not in the list any more.</p>
         ) : null}
       </div>
-      {detail !== null ? <TicketComposer onSend={reply} /> : null}
+      {detail !== null ? (
+        <TicketComposer
+          composerRef={composerRef}
+          delegatorChatId={chatId}
+          ticketId={ticketId}
+          projectId={delegator?.projectId ?? null}
+          projectPath={delegator?.row.localPath ?? null}
+          provider={delegator?.row.provider ?? null}
+          availableProviders={context.fallbackProviders}
+          onSend={reply}
+          onListSkills={listSkills}
+          previousPrompt={previousReply}
+        />
+      ) : null}
+      </div>
     </ViewerSurface>
   )
 })
