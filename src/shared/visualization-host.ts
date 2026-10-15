@@ -1,3 +1,4 @@
+import { VISUALIZATION_CAPTURE_SCRIPT } from "./visualization-capture"
 import { VISUALIZATION_CONTROLS_CSS, VISUALIZATION_CONTROLS_SCRIPT } from "./visualization-controls"
 
 export interface VisualizationTheme {
@@ -58,7 +59,7 @@ export function prepareVisualizationDocument(html: string, theme: VisualizationT
     if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing) parent.postMessage({type:'kanna:escape', repeat:event.repeat}, '*');
   });</script>`
   const prepared = html.replace(/\bsrcdoc="([^"]*)"/, (_, source: string) => {
-    const inner = withControlsScript(decodeAttribute(source).replace("</head>", `<style>${css}</style>${escape}</head>`))
+    const inner = withControlsScript(decodeAttribute(source).replace("</head>", `<style>${css}</style>${escape}<script>${VISUALIZATION_CAPTURE_SCRIPT}</script></head>`))
     return `srcdoc="${escapeAttribute(inner)}"`
   })
   // Browsers paint an opaque canvas when an iframe and its document disagree on
@@ -71,6 +72,9 @@ export function prepareVisualizationDocument(html: string, theme: VisualizationT
       // The saved shell passes on only the messages it knew when it was written.
       const frame = document.getElementById('visualization');
       if (frame && event.source === frame.contentWindow && parent !== window && event.data?.type === 'kanna:escape') parent.postMessage({type:'kanna:escape', repeat:event.data.repeat === true}, '*');
+      // Saving as a PNG: the request down, and the image (or why not) back up.
+      if (frame && event.source === parent && parent !== window && event.data?.type === 'kanna:capture') frame.contentWindow?.postMessage({type:'kanna:capture', id:event.data.id, background:event.data.background}, '*');
+      if (frame && event.source === frame.contentWindow && parent !== window && event.data?.type === 'kanna:captured') parent.postMessage({type:'kanna:captured', id:event.data.id, png:event.data.png, error:event.data.error}, '*');
     });
   })();</script>`
   return prepared.replace("</head>", `<style>${VISUALIZATION_SHELL_FIT_CSS}</style>${bootstrap}</head>`)
