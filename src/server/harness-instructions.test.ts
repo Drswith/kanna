@@ -49,11 +49,16 @@ describe("buildKannaSystemInstructions", () => {
     for (const name of named) expect(KANNA_TOOL_NAMES as readonly string[]).toContain(name)
     // The ticket board's rules: a delegator's only guide to it.
     expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Every hand-off names a ticket")
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Never put progress in it.")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("never progress.")
     expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Only `reply_to_ticket` writes on a ticket.")
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("One chat, one ticket at a time.")
+    // A delegator once reopened a Done ticket for each small new ask in its
+    // area. A new ask gets its own ticket; the chat can still be the same one.
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("A new ask is a new ticket")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("So is anything asked after a ticket is Done.")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("the same piece of work, or a new request?")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("The ticket separates the asks, not the chat")
     // Every delegator turn pays for it.
-    expect(KANNA_DELEGATOR_INSTRUCTIONS.length).toBeLessThan(1_700)
+    expect(KANNA_DELEGATOR_INSTRUCTIONS.length).toBeLessThan(2_000)
   })
 
   test("names only tools that exist", () => {

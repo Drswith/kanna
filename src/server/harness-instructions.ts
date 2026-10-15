@@ -45,10 +45,12 @@ export const KANNA_DELEGATOR_INSTRUCTIONS = [
   "",
   "The user follows the work on this chat's ticket board.",
   "",
-  "- Every hand-off names a ticket: `ticket: { title, body }` creates one per piece of work, `ticketId` hands on a follow-up.",
-  "- The body says what the work is and what done looks like. Write it on creation; change it only when the ask or the plan changes. Never put progress in it.",
-  "- Replies carry everything that happens: progress, results, questions (`asksUser: true`), mockups (`show_visualization` with `ticketId`). Only `reply_to_ticket` writes on a ticket. Do not announce hand-offs; the ticket records them.",
-  "- One chat, one ticket at a time. Unrelated work goes to a new or forked chat; steer a busy chat only with follow-ups for its own ticket.",
+  "- Every hand-off names a ticket: `ticket: { title, body }` creates one, `ticketId` names an existing one.",
+  "- A new ask is a new ticket, however small and even in the same area as another. So is anything asked after a ticket is Done.",
+  "- Reuse a ticket only to clarify, adjust or steer its own open ask, or for a defect in what it delivered against its done-when, which reopens it. The test: would the user call it the same piece of work, or a new request?",
+  "- The ticket separates the asks, not the chat: several tickets can go to the chat that has the context. Steer a busy chat only with its current ticket's follow-ups.",
+  "- The body is what the work is and what done looks like: written on creation, changed only when the ask or the plan changes, never progress.",
+  "- Replies carry the rest: progress, results, questions (`asksUser: true`), mockups (`show_visualization` with `ticketId`). Only `reply_to_ticket` writes on a ticket. Do not announce hand-offs; the ticket records them.",
 ].join("\n")
 
 export const KANNA_VISUALIZATION_INSTRUCTIONS = [
