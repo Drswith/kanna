@@ -156,7 +156,7 @@ interface ViewerState {
   stepBack: () => void
   setScrolledDiffPath: (path: string | null) => void
   toggleExpanded: () => void
-  /** The width you dragged the pane to, kept for this chat. */
+  /** The width you dragged the pane to: kept for every chat (`viewerWidthPx`). */
   setWidth: (widthPx: number) => void
   /** Called by a previewer that can show a chat, for as long as it is mounted. */
   registerChatPreviewHost: () => () => void
@@ -223,20 +223,18 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
     const current = currentViewer(chatKey)
     // The pane's own setting, under an item that opened expanded.
     const expanded = current ? current.expandedBefore ?? current.expanded : false
-    // An open pane keeps the width it was dragged to, whatever opens in it.
     // Something else opened over a chat preview keeps the way back to it,
     // through any number of files and images after it. Another chat doesn't:
     // that is the previewer moving on.
     const returnTo = isChatTrailItem(item) || !current
       ? undefined
       : isChatTrailItem(current.item)
-        ? { item: current.item, ...(current.widthPx !== undefined ? { widthPx: current.widthPx } : {}) }
+        ? { item: current.item }
         : current.returnTo
     useRightSidebarStore.getState().setChatViewer(chatKey, {
       item,
       expanded: options?.expanded || expanded,
       ...(options?.expanded && !expanded ? { expandedBefore: false } : {}),
-      ...(current?.widthPx !== undefined ? { widthPx: current.widthPx } : {}),
       ...(returnTo ? { returnTo } : {}),
     })
     set((state) => ({ openCount: state.openCount + 1, changedByKey: isKeyboardInitiated() }))
@@ -253,11 +251,9 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
       useRightSidebarStore.getState().setChatViewer(chatKey, null)
       return
     }
-    const { item, widthPx } = current.returnTo
     useRightSidebarStore.getState().setChatViewer(chatKey, {
-      item,
+      item: current.returnTo.item,
       expanded: current.expandedBefore ?? current.expanded,
-      ...(widthPx !== undefined ? { widthPx } : {}),
     })
   },
   closeAll: () => {
@@ -284,7 +280,6 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
     useRightSidebarStore.getState().setChatViewer(chatKey, {
       item: below.item,
       expanded: current.expandedBefore ?? current.expanded,
-      ...(below.widthPx !== undefined ? { widthPx: below.widthPx } : {}),
     })
     // A chat gone back to is opened again, as far as anything keyed on opens can tell.
     set((state) => ({ openCount: state.openCount + 1, changedByKey: isKeyboardInitiated() }))
@@ -295,9 +290,7 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
       : { ...viewer, reviewPath: path ?? undefined }
   )),
   toggleExpanded: () => updateViewer(get().chatKey, ({ expandedBefore: _, ...viewer }) => ({ ...viewer, expanded: !viewer.expanded })),
-  setWidth: (widthPx) => updateViewer(get().chatKey, (viewer) => (
-    viewer.widthPx === widthPx ? viewer : { ...viewer, widthPx }
-  )),
+  setWidth: (widthPx) => useRightSidebarStore.getState().setViewerWidth(widthPx),
   registerChatPreviewHost: () => {
     set((state) => ({ chatPreviewHosts: state.chatPreviewHosts + 1 }))
     return () => set((state) => ({ chatPreviewHosts: Math.max(0, state.chatPreviewHosts - 1) }))

@@ -10,15 +10,15 @@ describe("viewerLevelBelow on an ordinary chat", () => {
     expect(viewerLevelBelow({ item: FILE }, null)).toBe("closed")
   })
 
-  test("a file opened over a chat goes back to the chat, at its width", () => {
+  test("a file opened over a chat goes back to the chat", () => {
     const chat = { kind: "chat", chatId: "a" } as const
-    expect(viewerLevelBelow({ item: FILE, widthPx: 800, returnTo: { item: chat, widthPx: 520 } }, null))
-      .toEqual({ item: chat, widthPx: 520 })
+    expect(viewerLevelBelow({ item: FILE, returnTo: { item: chat } }, null))
+      .toEqual({ item: chat })
   })
 
-  test("a chat stepped to from another goes back to it, carrying the width", () => {
-    expect(viewerLevelBelow({ item: { kind: "chat", chatId: "c", back: ["a", "b"] }, widthPx: 480 }, null))
-      .toEqual({ item: { kind: "chat", chatId: "b", back: ["a"] }, widthPx: 480 })
+  test("a chat stepped to from another goes back to it", () => {
+    expect(viewerLevelBelow({ item: { kind: "chat", chatId: "c", back: ["a", "b"] } }, null))
+      .toEqual({ item: { kind: "chat", chatId: "b", back: ["a"] } })
     expect(viewerLevelBelow({ item: { kind: "chat", chatId: "b", back: ["a"] } }, null))
       .toEqual({ item: { kind: "chat", chatId: "a" } })
   })
@@ -32,25 +32,25 @@ describe("viewerLevelBelow on an ordinary chat", () => {
 describe("viewerLevelBelow on a delegator, whose pane has a floor", () => {
   test("the list is the last thing in the pane: under it the pane is shut", () => {
     expect(viewerLevelBelow({ item: LIST }, LIST)).toBe("closed")
-    expect(viewerLevelBelow({ item: LIST, widthPx: 500 }, LIST)).toBe("closed")
+    expect(viewerLevelBelow({ item: LIST }, LIST)).toBe("closed")
   })
 
   test("anything opened from the transcript goes back to the list", () => {
-    expect(viewerLevelBelow({ item: { kind: "chat", chatId: "a" }, widthPx: 500 }, LIST)).toEqual({ item: LIST, widthPx: 500 })
+    expect(viewerLevelBelow({ item: { kind: "chat", chatId: "a" } }, LIST)).toEqual({ item: LIST })
     // The pane's width is the pane's: a file leaves it as it found it.
-    expect(viewerLevelBelow({ item: FILE, widthPx: 500 }, LIST)).toEqual({ item: LIST, widthPx: 500 })
+    expect(viewerLevelBelow({ item: FILE }, LIST)).toEqual({ item: LIST })
   })
 
   test("something opened inside a previewed chat goes back to that chat first", () => {
     const chat = { kind: "chat", chatId: "b", back: ["a"] } as const
-    expect(viewerLevelBelow({ item: FILE, returnTo: { item: chat, widthPx: 520 } }, LIST)).toEqual({ item: chat, widthPx: 520 })
+    expect(viewerLevelBelow({ item: FILE, returnTo: { item: chat } }, LIST)).toEqual({ item: chat })
     expect(viewerLevelBelow({ item: chat }, LIST)).toEqual({ item: { kind: "chat", chatId: "a" } })
     expect(viewerLevelBelow({ item: { kind: "chat", chatId: "a" } }, LIST)).toEqual({ item: LIST })
   })
 
-  test("a file opened over the list goes back to the list at the list's width", () => {
-    expect(viewerLevelBelow({ item: FILE, widthPx: 800, returnTo: { item: LIST, widthPx: 440 } }, LIST))
-      .toEqual({ item: LIST, widthPx: 440 })
+  test("a file opened over the list goes back to the list", () => {
+    expect(viewerLevelBelow({ item: FILE, returnTo: { item: LIST } }, LIST))
+      .toEqual({ item: LIST })
   })
 
   test("another delegator's list is not this pane's floor", () => {
@@ -71,7 +71,7 @@ describe("viewerLevelBelow for tickets", () => {
   const TICKET = { kind: "ticket", chatId: "deleg", ticketId: "tk_00000d" } as const
 
   test("on its delegator's page a ticket goes back to its board, with or without the board as the floor", () => {
-    expect(viewerLevelBelow({ item: TICKET, widthPx: 440 }, LIST, "deleg")).toEqual({ item: LIST, widthPx: 440 })
+    expect(viewerLevelBelow({ item: TICKET }, LIST, "deleg")).toEqual({ item: LIST })
     // A phone: the delegator's page, with no floor.
     expect(viewerLevelBelow({ item: TICKET }, null, "deleg")).toEqual({ item: LIST })
   })

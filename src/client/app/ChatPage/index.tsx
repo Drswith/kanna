@@ -29,11 +29,11 @@ import { buildChatJumpLocationState } from "../../lib/chat-navigation"
 import { snapshotDroppedFiles } from "../../lib/snapshotDroppedFiles"
 import { useRightSidebarStore, useWidgetsOpen } from "../../stores/rightSidebarStore"
 import { ViewerLayer, usePresentedViewer, useViewerShown } from "../../components/viewer/ViewerLayer"
-import { resolveViewerSplitMove, viewerPaneState, type ViewerPaneState } from "../../lib/viewer-split"
+import { dockedViewerPaneWidthPx, resolveViewerSplitMove, viewerPaneState, type ViewerPaneState } from "../../lib/viewer-split"
 import { opensInViewer, projectRelativePath } from "../../components/viewer/localLinks"
 import type { OpenLocalLinkTarget } from "../../components/messages/shared"
 import { shouldOpenLocalFileLinkInEditor } from "../../lib/pathUtils"
-import { getChatViewer, openViewer, useChatViewer, useViewerStore, viewerWidthClass } from "../../stores/viewerStore"
+import { openViewer, useChatViewer, useViewerStore, viewerWidthClass } from "../../stores/viewerStore"
 import type { ChatPreviewContext } from "./ChatPreview"
 import { useOpenChat } from "../useOpenChat"
 import { useNewChatDelegate } from "./useNewChatDelegate"
@@ -201,20 +201,6 @@ function useLayoutWidth(ref: RefObject<HTMLDivElement | null>) {
 const MOBILE_BREAKPOINT_PX = 768
 /** Dragging the viewer's pane narrower than this closes it, as the terminal's does. */
 const VIEWER_PANE_CLOSE_WIDTH_PX = 240
-/**
- * The viewer's pane for anything but a review of changes (a file, an
- * attachment, a chart): room for the markdown preview's 72ch measure with
- * air either side, or about 100 columns of code, and no wider, so the chat
- * keeps the rest of the room.
- */
-const VIEWER_PREVIEW_PANE_WIDTH_PX = 800
-/**
- * The viewer's pane for a sub-chat: half the room, so the chat it reports to
- * keeps the other half, between a width its composer still fits in and the
- * transcript column's own.
- */
-const VIEWER_CHAT_PANE_MIN_WIDTH_PX = 420
-const VIEWER_CHAT_PANE_MAX_WIDTH_PX = 800
 
 /** The chat pane never shrinks past this, so it also fixes the terminal's ceiling. */
 export const CHAT_MIN_SIZE_PERCENT = 25
@@ -1198,25 +1184,18 @@ export function ChatPage() {
   const viewerSplitElementRef = useRef<HTMLDivElement | null>(null)
   const viewerSplitAnimationRef = useRef<number | null>(null)
   const viewerSplitStateRef = useRef<{ group: GroupImperativeHandle | null; state: ViewerPaneState; chatKey: string }>({ group: null, state: "closed", chatKey: "" })
-  // The split a docked pane takes for what's open: the width you dragged it
-  // to, else the one for its kind.
+  // The split a docked pane takes for what's open (`dockedViewerPaneWidthPx`).
   const dockedViewerSplit = (): [number, number] => {
     const splitWidth = viewerSplitElementRef.current?.clientWidth ?? 0
     if (splitWidth <= 0) return [100, 0]
     const pageWidth = layoutRootRef.current?.clientWidth ?? 0
     const chatMinPx = pageWidth * (CHAT_MIN_WORKSPACE_SIZE_PERCENT / 100)
-    const draggedWidthPx = getChatViewer()?.widthPx
-    const paneWidthPx = Math.min(
-      splitWidth - chatMinPx,
-      draggedWidthPx ?? (
-        viewerWidth === "review"
-          ? Infinity
-          : viewerWidth === "chat"
-            ? Math.min(VIEWER_CHAT_PANE_MAX_WIDTH_PX, Math.max(VIEWER_CHAT_PANE_MIN_WIDTH_PX, splitWidth / 2))
-            : VIEWER_PREVIEW_PANE_WIDTH_PX
-      ),
-    )
-    const panePercent = Math.max(0, (paneWidthPx / splitWidth) * 100)
+    const panePercent = (dockedViewerPaneWidthPx({
+      splitWidthPx: splitWidth,
+      chatMinPx,
+      draggedWidthPx: useRightSidebarStore.getState().viewerWidthPx,
+      widthClass: viewerWidth,
+    }) / splitWidth) * 100
     return [100 - panePercent, panePercent]
   }
   // What's on screen, which outlives a close by its exit animation. The
