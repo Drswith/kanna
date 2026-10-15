@@ -65,11 +65,11 @@ const readChat = z.strictObject({
  * or the other, and ignored from any other chat (`chooseTicket`).
  */
 const ticketChoice = {
-  ticketId: z.string().optional().describe("Delegator chats: the ticket this work is for. A delegator must pass this or ticket."),
+  ticketId: z.string().optional().describe("Delegator chats: the ticket this work is for. Naming a Done ticket reopens it, so do that only for a defect in what it delivered; a new ask takes ticket instead. A delegator must pass this or ticket."),
   ticket: z.strictObject({
     title: z.string().min(1),
     body: z.string().optional().describe("Markdown: what the work is and what done looks like."),
-  }).optional().describe("Delegator chats: create the ticket for this work in the same call."),
+  }).optional().describe("Delegator chats: create the ticket for this work in the same call. One ask per ticket."),
 }
 
 const createChat = z.strictObject({
@@ -158,7 +158,7 @@ const updateTicket = z.strictObject({
 const replyToTicket = z.strictObject({
   ticketId: z.string(),
   text: z.string().describe("Markdown."),
-  asksUser: z.boolean().optional().describe("true when the reply asks the user something. The ticket waits on them until they reply."),
+  asksUser: z.boolean().optional().describe("true only for a question that blocks the work or its Done; the ticket waits on the user until they reply. false withdraws an open question."),
   attachments: z.array(attachmentItemSchema).max(24).optional().describe("Files to show with the reply: local paths or HTTP/HTTPS URLs, as send_attachments takes them."),
 })
 
@@ -282,7 +282,7 @@ export const ORCHESTRATION_TOOLS: readonly KannaToolDefinition[] = [
   },
   {
     name: "update_ticket",
-    description: "Delegator chats only. Rename a ticket, replace its body when the ask or the plan changes, or close (status done) or reopen (open) it. A chat on it that is still working or waiting on the user keeps it out of Done until it finishes.",
+    description: "Delegator chats only. Rename a ticket or replace its body when its ask changes, so both match the work. A ticket is Done by itself once its chats have reported and nothing is asked. status done closes one whose work ends without a report (answered here, dropped, superseded) and clears its question. status open reopens one only for a defect in what it delivered; a new ask is a new ticket. A chat on it that is still working or waiting on the user keeps it out of Done until it finishes.",
     schema: updateTicket,
     async execute(input, context) {
       return reply(await orchestration(context).updateTicket(context.chatId, updateTicket.parse(input)))
@@ -290,7 +290,7 @@ export const ORCHESTRATION_TOOLS: readonly KannaToolDefinition[] = [
   },
   {
     name: "reply_to_ticket",
-    description: "Delegator chats only. Post on a ticket: progress, results, questions. This is the only way to write on one; nothing said in this chat reaches it. asksUser: true puts the ticket in Waiting on you until the user replies there. For a mockup or a chart, call show_visualization with ticketId. Do not post that you handed work on: the ticket records hand-offs. Returns replyId.",
+    description: "Delegator chats only. Post on a ticket. The user reads the ticket, not this chat, and this is the only way to write on one. Post when its work comes back: start with whether the body's done-when is met, then what the user should know or try. Or post when you decide something for the user. Do not post a plan, a hand-off (the ticket records it) or \"nothing new\". asksUser: true puts the ticket in Waiting on you until the user replies there. Use it only when the work cannot go on, or be called done, without the answer, and lead with the question. A choice with a sensible default is not a block: name the default in the text and go on. asksUser: false withdraws a question settled elsewhere. For a mockup or a chart, call show_visualization with ticketId. Returns replyId.",
     schema: replyToTicket,
     async execute(input, context) {
       const { ticketId, text, asksUser, attachments } = replyToTicket.parse(input)

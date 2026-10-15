@@ -13,7 +13,7 @@ const schema = z.strictObject({
   html: z.string().min(1).max(VISUALIZATION_MAX_BYTES).optional().describe("Self-contained HTML fragment, including inline CSS and JavaScript. Supply html or path, not both."),
   path: z.string().min(1).optional().describe("HTML file, absolute or relative to the project. Copied into this chat; source edits will not change the saved visualization."),
   height: z.number().int().min(80).max(VISUALIZATION_MAX_HEIGHT).optional().describe("Initial height in CSS pixels, default 360. The frame then fits the content automatically."),
-  ticketId: z.string().optional().describe("Delegator chats: also post it on this ticket, as a reply."),
+  ticketId: z.string().optional().describe("Delegator chats only: also post it on this ticket, as a reply. Other chats cannot post on tickets."),
 })
 
 /**

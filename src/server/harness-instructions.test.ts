@@ -60,6 +60,13 @@ describe("buildKannaSystemInstructions", () => {
     // What it tells the user about is the ticket, which opens in the pane.
     expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("link its ticket, not the chat: [#8 Title](link)")
     expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Link a chat only when the user needs the chat itself.")
+    // A delegator once pinned each commit on whichever ticket was nearby, so
+    // the rest kept saying "uncommitted" after the push.
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("A commit or push is a ticket of its own")
+    // It filled tickets with "nothing new" and with plans the hand-off rows already showed.
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("post nothing when nothing is new")
+    // And let titles and bodies drift from the work they had grown into.
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("rewrite the title and body")
     // Every delegator turn pays for it.
     expect(KANNA_DELEGATOR_INSTRUCTIONS.length).toBeLessThan(2_200)
   })

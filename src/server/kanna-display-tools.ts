@@ -99,7 +99,7 @@ export async function resolveAttachments(
 }
 
 const sendAttachmentsSchema = attachmentSchema.extend({
-  ticketId: z.string().optional().describe("Delegator chats: also post these on this ticket."),
+  ticketId: z.string().optional().describe("Delegator chats only: also post these on this ticket, as a reply. Other chats cannot post on tickets."),
 })
 
 export const DISPLAY_TOOLS: readonly KannaToolDefinition[] = [
