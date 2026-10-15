@@ -77,6 +77,15 @@ describe("the ticket pane", () => {
     expect(html).not.toContain("data-row-key")
   })
 
+  test("sets the title and body in the transcript's column, as the activity is", () => {
+    const column = 'class="mx-auto w-full max-w-[816px] px-2'
+    expect(html.indexOf(column)).toBeGreaterThan(-1)
+    expect(html.indexOf(column)).toBeLessThan(html.indexOf("Edit a visualization"))
+    // The title's column, then the body's.
+    expect(html.split(column).length - 1).toBe(2)
+    expect(html).not.toContain('class="px-5')
+  })
+
   test("has no pill and no Activity heading", () => {
     expect(html).not.toContain(">In progress<")
     expect(html).not.toContain(">Activity<")

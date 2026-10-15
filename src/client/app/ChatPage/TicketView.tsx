@@ -4,7 +4,7 @@ import type { TicketDetail } from "../../../shared/tickets"
 import type { AgentProvider, ChatSkillsSnapshot } from "../../../shared/types"
 import type { ChatInputHandle } from "../../components/chat-ui/ChatInput"
 import { useSidebarThread } from "../../components/chat-ui/chat-reference"
-import { TicketActivity, TicketComposer, type TicketReplyOptions, TicketDetailBody, TicketMenu, TicketTitle } from "../../components/tickets/TicketDetail"
+import { TicketActivity, TicketColumn, TicketComposer, type TicketReplyOptions, TicketDetailBody, TicketMenu, TicketTitle } from "../../components/tickets/TicketDetail"
 import { ViewerIconButton, ViewerSurface } from "../../components/viewer/ViewerSurface"
 import { copyTextToClipboard } from "../../lib/clipboard"
 import { delegatorDisplayTitle } from "../../lib/delegators"
@@ -197,7 +197,7 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
           />
         ) : summary ? (
           // The board's row, until the ticket itself arrives.
-          <div className="px-5 pb-1 pt-3.5"><TicketTitle ticket={summary} /></div>
+          <TicketColumn className="pb-1 pt-3.5"><TicketTitle ticket={summary} /></TicketColumn>
         ) : detail === null ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">This ticket is not in the list any more.</p>
         ) : null}

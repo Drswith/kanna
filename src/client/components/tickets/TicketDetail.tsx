@@ -17,7 +17,7 @@ import { AttachmentsCard } from "../messages/DisplayToolMessage"
 import { formatPromptBoundary, TimeBoundary } from "../messages/ResultMessage"
 import { MetaIconSlot, MetaLabel, MetaRow } from "../messages/shared"
 import { AssistantText } from "../messages/TextMessage"
-import { TRANSCRIPT_ROW_CLASS } from "../messages/transcript-row"
+import { TRANSCRIPT_COLUMN_CLASS, TRANSCRIPT_ROW_CLASS } from "../messages/transcript-row"
 import { UserMessage } from "../messages/UserMessage"
 import { Visualization } from "../messages/Visualization"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
@@ -211,6 +211,20 @@ export function TicketActivity({ blocks, chatTitle, onOpenChat }: {
 }
 
 /**
+ * The transcript's column, at its inset (the viewport's 12px, a row's 8px),
+ * for what heads a ticket: its title and body sit where its activity's text
+ * does, in a narrow pane 20px in and in a wide one in the same centred
+ * column. Not a row's box, which would add a row's margin between them.
+ */
+export function TicketColumn({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <div className="px-3">
+      <div className={cn(TRANSCRIPT_COLUMN_CLASS, "px-2", className)}>{children}</div>
+    </div>
+  )
+}
+
+/**
  * The ticket's head: its mark and title, then the body, and under it, where
  * the conversation starts, the transcript's own
  * rule, saying how many replies there are (`ticketRepliesLabel`). Live: the
@@ -222,14 +236,13 @@ export function TicketDetailBody({ ticket, activity }: {
 }) {
   return (
     <>
-      {/* The transcript's 20px inset, so the title, the body and the activity share one column. */}
-      <div className="px-5 pb-1 pt-3.5">
+      <TicketColumn className="pb-1 pt-3.5">
         <TicketTitle ticket={ticket} />
-      </div>
-      <div className="px-5 pb-1.5 pt-1.5">
+      </TicketColumn>
+      <TicketColumn className="pb-1.5 pt-1.5">
         {/* An agent's text, as the transcript draws one: the same prose, and the same markdown. */}
         {ticket.body.trim() ? <AssistantText text={ticket.body} /> : null}
-      </div>
+      </TicketColumn>
       {/* In a transcript row's box at the activity's inset, as the rules between its turns are. */}
       <div className="px-3">
         <div className={TRANSCRIPT_ROW_CLASS}><TimeBoundary label={ticketRepliesLabel(ticket.replies.length)} /></div>
