@@ -316,6 +316,23 @@
 }
 
 /*
+ * The ticket pane under its header. Its height sets the air above a ticket's
+ * title and under its body: 24px when the pane is about 600px tall or less,
+ * 44px from about 900px, in a line between. It measures the pane, not the
+ * window, which can be much taller, and the pane and not its scroller, which
+ * shrinks as the composer grows: the title must not move while typing.
+ * Outside it, `cqh` falls back to the viewport. No transition: on a resize it
+ * is just the value.
+ */
+.kanna-ticket-pane {
+  container-type: size;
+  /* 540px of body (pane less its 49px header) to 24px, 840px to 44px. */
+  --ticket-head-gap: clamp(24px, 20cqh / 3 - 12px, 44px);
+  /* The rule's row adds its own 8px of padding above the line. */
+  --ticket-body-end: calc(var(--ticket-head-gap) - 8px);
+}
+
+/*
  * A ticket's ••• menu: grown out of its button, a step smaller to start than
  * the app's other floating surfaces since it is larger than most of them,
  * on a translucent material that turns solid where transparency is reduced.

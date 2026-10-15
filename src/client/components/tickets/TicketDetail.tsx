@@ -211,6 +211,14 @@ export function TicketActivity({ blocks, chatTitle, onOpenChat }: {
 }
 
 /**
+ * The air between the pane's header and the title, here and while the
+ * ticket loads, and under the body down to the replies' rule. Fluid with the
+ * pane's height: see `.kanna-ticket-pane`.
+ */
+export const TICKET_HEAD_TOP_CLASS = "pt-(--ticket-head-gap)"
+const TICKET_BODY_END_CLASS = "pb-(--ticket-body-end)"
+
+/**
  * The transcript's column, at its inset (the viewport's 12px, a row's 8px),
  * for what heads a ticket: its title and body sit where its activity's text
  * does, in a narrow pane 20px in and in a wide one in the same centred
@@ -234,15 +242,19 @@ export function TicketDetailBody({ ticket, activity }: {
   ticket: TicketDetail
   activity: ReactNode
 }) {
+  const hasBody = Boolean(ticket.body.trim())
   return (
     <>
-      <TicketColumn className="pb-1 pt-3.5">
+      {/* The same air down to the rule as above the title, from the body or, with none, the title. */}
+      <TicketColumn className={cn(TICKET_HEAD_TOP_CLASS, hasBody ? "pb-1" : TICKET_BODY_END_CLASS)}>
         <TicketTitle ticket={ticket} />
       </TicketColumn>
-      <TicketColumn className="pb-1.5 pt-1.5">
-        {/* An agent's text, as the transcript draws one: the same prose, and the same markdown. */}
-        {ticket.body.trim() ? <AssistantText text={ticket.body} /> : null}
-      </TicketColumn>
+      {hasBody ? (
+        <TicketColumn className={cn(TICKET_BODY_END_CLASS, "pt-1.5")}>
+          {/* An agent's text, as the transcript draws one: the same prose, and the same markdown. */}
+          <AssistantText text={ticket.body} />
+        </TicketColumn>
+      ) : null}
       {/* In a transcript row's box at the activity's inset, as the rules between its turns are. */}
       <div className="px-3">
         <div className={TRANSCRIPT_ROW_CLASS}><TimeBoundary label={ticketRepliesLabel(ticket.replies.length)} /></div>

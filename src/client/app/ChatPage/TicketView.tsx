@@ -4,7 +4,7 @@ import type { TicketDetail } from "../../../shared/tickets"
 import type { AgentProvider, ChatSkillsSnapshot } from "../../../shared/types"
 import type { ChatInputHandle } from "../../components/chat-ui/ChatInput"
 import { useSidebarThread } from "../../components/chat-ui/chat-reference"
-import { TicketActivity, TicketColumn, TicketComposer, type TicketReplyOptions, TicketDetailBody, TicketMenu, TicketTitle } from "../../components/tickets/TicketDetail"
+import { TICKET_HEAD_TOP_CLASS, TicketActivity, TicketColumn, TicketComposer, type TicketReplyOptions, TicketDetailBody, TicketMenu, TicketTitle } from "../../components/tickets/TicketDetail"
 import { ViewerIconButton, ViewerSurface } from "../../components/viewer/ViewerSurface"
 import { copyTextToClipboard } from "../../lib/clipboard"
 import { delegatorDisplayTitle } from "../../lib/delegators"
@@ -179,7 +179,8 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
         />
       ) : null}
       onClose={onClose}
-      bodyClassName="flex flex-col overflow-hidden"
+      // Sized by the pane, for the air around the ticket's head.
+      bodyClassName="kanna-ticket-pane flex flex-col overflow-hidden"
     >
       <div className="flex min-h-0 flex-1 flex-col" onDragOver={handleDragOver} onDrop={handleDrop}>
       <div
@@ -197,7 +198,7 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
           />
         ) : summary ? (
           // The board's row, until the ticket itself arrives.
-          <TicketColumn className="pb-1 pt-3.5"><TicketTitle ticket={summary} /></TicketColumn>
+          <TicketColumn className={`${TICKET_HEAD_TOP_CLASS} pb-1`}><TicketTitle ticket={summary} /></TicketColumn>
         ) : detail === null ? (
           <p className="px-4 py-6 text-sm text-muted-foreground">This ticket is not in the list any more.</p>
         ) : null}
