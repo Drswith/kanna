@@ -300,6 +300,67 @@
 }
 
 /*
+ * A status ping that has just appeared grows in (`TicketMark` decides when).
+ * The class stays on after it has run, and a class that stays does not
+ * replay, so redrawing the row does not play it again.
+ */
+.kanna-mark-enter {
+  animation: kanna-mark-enter 150ms var(--ease-snappy);
+}
+
+@keyframes kanna-mark-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+/*
+ * A ticket's ••• menu: grown out of its button, a step smaller to start than
+ * the app's other floating surfaces since it is larger than most of them,
+ * on a translucent material that turns solid where transparency is reduced.
+ */
+.kanna-ticket-menu {
+  transform-origin: var(--radix-popover-content-transform-origin, top right);
+  background-color: color-mix(in oklab, var(--color-popover) 86%, transparent);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+}
+
+.kanna-ticket-menu[data-state="open"] {
+  animation: kanna-ticket-menu-in 150ms var(--ease-snappy);
+}
+
+.kanna-ticket-menu[data-state="closed"] {
+  animation: floating-surface-out 100ms var(--ease-snappy) forwards;
+}
+
+@keyframes kanna-ticket-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .kanna-ticket-menu {
+    background-color: var(--color-popover);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kanna-mark-enter {
+    animation: none;
+  }
+
+  .kanna-ticket-menu[data-state="open"] {
+    animation: floating-surface-fade-in 150ms var(--ease-snappy);
+  }
+}
+
+/*
  * The table skeleton's wave: each bar brightens and draws out to full length
  * as the band passes, then rests for the rest of the cycle. Delays are set
  * per cell by its diagonal. Stepped for the same reason as `kanna-ping`:

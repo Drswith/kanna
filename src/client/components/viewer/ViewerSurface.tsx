@@ -58,6 +58,10 @@ export interface ViewerPlacement {
 
 const ViewerPlacementContext = createContext<ViewerPlacement | null>(null)
 export const ViewerPlacementProvider = ViewerPlacementContext.Provider
+/** For a view that lays itself out differently expanded: a delegator's board turns into columns. */
+export function useViewerPlacement(): ViewerPlacement | null {
+  return useContext(ViewerPlacementContext)
+}
 
 /**
  * The pane this card is in has a floor under what is opened in it (see
@@ -357,7 +361,9 @@ export function ViewerSurface({
           {back ? <div className="-ml-2 flex shrink-0 items-center">{back}</div> : null}
           {icon ? <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground [&_svg]:size-4">{icon}</span> : null}
           <div className="flex min-w-0 flex-1 items-baseline gap-2">
-            <span className="min-w-0 max-w-[60%] shrink-0 truncate text-sm font-medium text-foreground">{title}</span>
+            {/* The cap keeps room for the subtitle. A title alone (a
+                delegator's list, headed by its name) has the row to itself. */}
+            <span className={cn("min-w-0 truncate text-sm font-medium text-foreground", subtitle ? "max-w-[60%] shrink-0" : "flex-1")}>{title}</span>
             {subtitle ? <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{subtitle}</span> : null}
           </div>
         </div>

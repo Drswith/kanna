@@ -2,6 +2,7 @@ import { delegatedAttentionCount } from "../../lib/delegators"
 import { cn } from "../../lib/utils"
 import { useRightSidebarStore } from "../../stores/rightSidebarStore"
 import { useSidebarStore } from "../../stores/sidebarStore"
+import { useTicketBoardStore } from "../../stores/ticketBoardStore"
 import { openViewer, useViewerStore } from "../../stores/viewerStore"
 import { Button } from "../ui/button"
 import { DelegatorIcon } from "./delegator-icon"
@@ -38,15 +39,24 @@ export function toggleDelegatedPane(chatId: string) {
  */
 export function DelegatedListButton({ chatId, overlay }: { chatId: string; overlay: boolean }) {
   // A number, so the button re-renders when the count moves and not for
-  // every push of the sidebar.
-  const count = useSidebarStore((state) => {
+  // every push of the sidebar. A delegator with a board counts its tickets:
+  // waiting on the user, or Done and unread. Its own snapshot says so first,
+  // the sidebar's row (which leaves out a zero) otherwise. One from before
+  // tickets counts the chats under it, as its list shows them.
+  const boardCount = useTicketBoardStore((state) => state.boards[chatId]?.attention)
+  const sidebarCount = useSidebarStore((state) => {
     let total = 0
-    for (const group of state.data.projectGroups) total += delegatedAttentionCount(group.chats, chatId)
-    return total
+    let tickets: number | undefined
+    for (const group of state.data.projectGroups) {
+      total += delegatedAttentionCount(group.chats, chatId)
+      tickets ??= group.chats.find((row) => row.chatId === chatId)?.ticketAttention
+    }
+    return tickets ?? total
   })
+  const count = boardCount ?? sidebarCount
   const open = useRightSidebarStore((store) => Boolean(store.chatViewers[chatId]))
   const pressed = open && !overlay
-  const action = pressed ? "Hide delegated chats" : "Show delegated chats"
+  const action = pressed ? "Hide the board" : "Show the board"
   const label = count > 0 ? `${action}, ${count} ${count === 1 ? "wants" : "want"} you` : action
   return (
     <Tooltip>

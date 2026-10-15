@@ -45,6 +45,8 @@ import { getChatViewer, openViewer, useChatViewer, useViewerStore, viewerWidthCl
 import type { ChatPreviewContext } from "./ChatPreview"
 import { useOpenChat } from "../useOpenChat"
 import { useNewChatDelegate } from "./useNewChatDelegate"
+import { useTicketDeepLink } from "./useTicketDeepLink"
+import { usePublishTicketBoard } from "../../stores/ticketBoardStore"
 import { useDelegateStore } from "../../stores/delegateStore"
 import { useAppDialog } from "../../components/ui/app-dialog"
 import type { DiffViewerContext } from "../../components/chat-ui/git/DiffViewer"
@@ -645,6 +647,10 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     setViewerFloor({ kind: "delegated", chatId: viewerFloorChatId }, { openByDefault: firstTime })
     if (firstTime) delegateStore.markPaneShown(viewerFloorChatId)
   }, [setViewerFloor, state.sidebarReady, viewerFloorChatId])
+  // The board is drawn in the pane and in the transcript's ticket cards, and
+  // this snapshot is where it comes from (`ticketBoardStore`).
+  usePublishTicketBoard(state.chatSnapshot)
+  useTicketDeepLink(state.activeChatId, state.sidebarReady, isDelegator)
   const navigate = useNavigate()
   // The graph of a sub-chat is the graph of its top-most ancestor, so the
   // URL is rewritten to name that chat. One tree then has one address, and

@@ -47,6 +47,7 @@ export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): 
     const origin = {
       ...(item.graph ? { graph: item.graph } : {}),
       ...(item.delegated ? { delegated: item.delegated } : {}),
+      ...(item.ticket ? { ticket: item.ticket } : {}),
     }
     const previous = item.back?.[item.back.length - 1]
     if (previous) {
@@ -56,8 +57,13 @@ export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): 
     // The first chat of a trail goes back to what it was picked from: the
     // graph, which was itself opened over the list if there is one.
     if (item.graph) return { item: { kind: "graph", chatId: item.graph }, ...kept }
+    if (item.delegated && item.ticket) return { item: { kind: "ticket", chatId: item.delegated, ticketId: item.ticket }, ...kept }
     if (item.delegated) return { item: { kind: "delegated", chatId: item.delegated }, ...kept }
   }
+  // A ticket is opened over its board, from the board or from anywhere else
+  // (a card in the transcript, a link), and goes back to it. On a phone too,
+  // where the board is no floor and Back from it shuts the overlay.
+  if (item.kind === "ticket") return { item: { kind: "delegated", chatId: item.chatId }, ...kept }
 
   if (!floor || sameItem(item, floor)) return "closed"
   return { item: floor, ...kept }

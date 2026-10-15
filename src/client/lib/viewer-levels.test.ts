@@ -74,3 +74,23 @@ describe("hasViewerLevelBelow", () => {
     expect(hasViewerLevelBelow({ item: { kind: "chat", chatId: "b", back: ["a"] } }, null)).toBe(true)
   })
 })
+
+describe("viewerLevelBelow for tickets", () => {
+  const TICKET = { kind: "ticket", chatId: "deleg", ticketId: "tk_00000d" } as const
+
+  test("a ticket goes back to its board, with or without the board as the floor", () => {
+    expect(viewerLevelBelow({ item: TICKET, widthPx: 440 }, LIST)).toEqual({ item: LIST, widthPx: 440 })
+    expect(viewerLevelBelow({ item: TICKET }, null)).toEqual({ item: LIST })
+  })
+
+  test("a chat opened from a ticket goes back to the ticket, and keeps it through its trail", () => {
+    expect(viewerLevelBelow({ item: { kind: "chat", chatId: "a", delegated: "deleg", ticket: "tk_00000d" } }, LIST))
+      .toEqual({ item: TICKET })
+    expect(viewerLevelBelow({ item: { kind: "chat", chatId: "b", back: ["a"], delegated: "deleg", ticket: "tk_00000d" } }, LIST))
+      .toEqual({ item: { kind: "chat", chatId: "a", delegated: "deleg", ticket: "tk_00000d" } })
+  })
+
+  test("a file opened over a ticket goes back to it", () => {
+    expect(viewerLevelBelow({ item: FILE, returnTo: { item: TICKET } }, LIST)).toEqual({ item: TICKET })
+  })
+})

@@ -98,13 +98,16 @@ export function useOpenChat(): OpenChat {
       // opened from the page starts a new trail, with neither behind it.
       const inPane = options?.from === "preview"
       const graph = inPane && item?.kind === "chat" ? item.graph : undefined
-      const delegated = !inPane ? undefined : item?.kind === "delegated" ? item.chatId : item?.kind === "chat" ? item.delegated : undefined
+      const delegated = !inPane ? undefined : item?.kind === "delegated" || item?.kind === "ticket" ? item.chatId : item?.kind === "chat" ? item.delegated : undefined
+      // A chat opened from a ticket's chip keeps the ticket to go back to.
+      const ticket = !inPane ? undefined : item?.kind === "ticket" ? item.ticketId : item?.kind === "chat" ? item.ticket : undefined
       viewerStore.open({
         kind: "chat",
         chatId,
         ...(action.back.length > 0 ? { back: action.back } : {}),
         ...(graph ? { graph } : {}),
         ...(delegated ? { delegated } : {}),
+        ...(delegated && ticket ? { ticket } : {}),
       })
       if (options?.jump) viewerStore.setChatJump(chatId, options.jump)
     } else {

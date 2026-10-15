@@ -45,8 +45,10 @@ export type ViewerItem =
    * graph was opened for. It is the start of that chat's trail, so Back from
    * it, or from the first chat on `back`, returns to the graph. `delegated`
    * is the same for a chat picked from a delegator's list: the delegator.
+   * `ticket` goes with it for a chat opened from one of that delegator's
+   * tickets, so the trail ends at the ticket and then at the board.
    */
-  | { kind: "chat"; chatId: string; back?: string[]; graph?: string; delegated?: string }
+  | { kind: "chat"; chatId: string; back?: string[]; graph?: string; delegated?: string; ticket?: string }
   /**
    * The tree of sub-chats `chatId` is in, drawn from its root (see
    * `app/ChatGraph`). Selecting a chat in it puts that chat in its place.
@@ -60,6 +62,11 @@ export type ViewerItem =
    * phone, over the transcript.
    */
   | { kind: "delegated"; chatId: string }
+  /**
+   * One ticket of the delegator `chatId`'s board, opened over the board:
+   * Back goes to the board, wherever the ticket was opened from.
+   */
+  | { kind: "ticket"; chatId: string; ticketId: string }
 
 /**
  * What decides the width a pane opens at: a review, a preview and a chat
@@ -79,8 +86,8 @@ export function viewerWidthClass(item: ViewerItem): ViewerWidthClass {
  * share a width, so the pane holds still while a graph or a list turns into
  * the chat picked from it.
  */
-export function isChatTrailItem(item: ViewerItem): item is Extract<ViewerItem, { kind: "chat" | "graph" | "delegated" }> {
-  return item.kind === "chat" || item.kind === "graph" || item.kind === "delegated"
+export function isChatTrailItem(item: ViewerItem): item is Extract<ViewerItem, { kind: "chat" | "graph" | "delegated" | "ticket" }> {
+  return item.kind === "chat" || item.kind === "graph" || item.kind === "delegated" || item.kind === "ticket"
 }
 
 /** The pane's floor on a delegator's page: that delegator's list. */

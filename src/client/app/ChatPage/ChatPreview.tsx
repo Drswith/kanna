@@ -33,6 +33,7 @@ import { createToolPayloadStore } from "./toolPayloadStore"
 import type { TranscriptJumpRequest } from "./transcriptScrollAnchors"
 import { useTranscriptPaddingBottom } from "./useTranscriptPaddingBottom"
 import { hasFileDragTypes, sameContextWindowSnapshot } from "./utils"
+import { usePublishTicketBoard } from "../../stores/ticketBoardStore"
 
 type ChatViewerItem = Extract<ViewerItem, { kind: "chat" }>
 
@@ -135,7 +136,7 @@ export const ChatPreview = memo(function ChatPreview({ item, context, onClose }:
     ? null
     : below.item.kind === "chat"
       ? (backThread ? `Back to ${backThread.title}` : "Back")
-      : below.item.kind === "graph" ? "Back to graph" : "Back to delegated chats"
+      : below.item.kind === "graph" ? "Back to graph" : below.item.kind === "ticket" ? "Back to ticket" : "Back to the board"
   const handleBack = useViewerStore((store) => store.stepBack)
   const handleOpenInTab = useCallback(() => openChat(chatId, { target: "tab" }), [chatId, openChat])
 
@@ -191,6 +192,8 @@ function ChatPreviewSession({ chatId, title, projectId: sidebarProjectId, projec
 }) {
   const { socket } = context
   const session = useChatSession({ socket, chatId, fallbackProviders: context.fallbackProviders })
+  // A delegator previewed here has its tickets in its transcript too.
+  usePublishTicketBoard(session.chatSnapshot)
   const projectId = session.runtime?.projectId ?? sidebarProjectId
   const projectPath = session.runtime?.localPath ?? sidebarProjectPath
   const projectRepoLabel = useNavbarRepoLabel(projectId, projectPath ?? undefined)

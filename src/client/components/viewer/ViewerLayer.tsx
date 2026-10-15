@@ -22,6 +22,7 @@ const FileViewer = lazy(() => import("./FileViewer").then((m) => ({ default: m.F
 const ChatPreview = lazy(() => import("../../app/ChatPage/ChatPreview").then((m) => ({ default: m.ChatPreview })))
 // React Flow comes with it, and only a page that can preview a chat shows one.
 const DelegatedList = lazy(() => import("../../app/ChatPage/DelegatedList").then((m) => ({ default: m.DelegatedList })))
+const TicketView = lazy(() => import("../../app/ChatPage/TicketView").then((m) => ({ default: m.TicketView })))
 const GraphViewer = lazy(() => import("../../app/ChatGraph/GraphViewer").then((m) => ({ default: m.GraphViewer })))
 
 /**
@@ -81,7 +82,7 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
   const backKind = hasBack ? below.item.kind : null
   const floorState = useMemo<ViewerFloorState | null>(() => (floor ? {
     onBack: hasBack ? stepBack : null,
-    backLabel: backKind === "chat" ? "Back to chat" : backKind === "graph" ? "Back to graph" : "Back to delegated chats",
+    backLabel: backKind === "chat" ? "Back to chat" : backKind === "graph" ? "Back to graph" : backKind === "ticket" ? "Back to ticket" : "Back to the board",
     onShut: shut,
   } : null), [backKind, floor, hasBack, shut, stepBack])
   useEffect(() => (canShowChat ? useViewerStore.getState().registerChatPreviewHost() : undefined), [canShowChat])
@@ -93,6 +94,7 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
     const timer = window.setTimeout(() => {
       void import("../../app/ChatPage/ChatPreview")
       void import("../../app/ChatPage/DelegatedList")
+      void import("../../app/ChatPage/TicketView")
     }, 1500)
     return () => window.clearTimeout(timer)
   }, [canShowChat])
@@ -163,6 +165,9 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
             <ChatPreview item={item} context={chat} onClose={close} />
           ) : item.kind === "delegated" ? (
             <DelegatedList item={item} onClose={close} />
+          ) : item.kind === "ticket" && chat ? (
+            // Keyed so another ticket starts over: its own subscription, its own scroll.
+            <TicketView key={`${item.chatId}:${item.ticketId}`} item={item} context={chat} onClose={close} />
           ) : null}
         </Suspense>
       </OpenLocalLinkProvider>
