@@ -48,7 +48,7 @@ import { useNewChatDelegate } from "./useNewChatDelegate"
 import { useDelegateStore } from "../../stores/delegateStore"
 import { useAppDialog } from "../../components/ui/app-dialog"
 import type { DiffViewerContext } from "../../components/chat-ui/git/DiffViewer"
-import { useChatIsDelegator, useProjectRepoUrl, useSidebarChatHasMessages } from "../../stores/sidebarStore"
+import { useChatExists, useChatIsDelegator, useProjectRepoUrl, useSidebarChatIsNew } from "../../stores/sidebarStore"
 import { useAppSettingsStore } from "../../stores/appSettingsStore"
 import { DEFAULT_PROJECT_TERMINAL_LAYOUT, isTerminalVisible, useTerminalLayoutStore } from "../../stores/terminalLayoutStore"
 import { usePaneChatKey } from "../../lib/paneVisibility"
@@ -515,23 +515,28 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [pendingTerminalCommands, setPendingTerminalCommands] = useState<Record<string, string>>({})
   const [defaultModelsDialogOpen, setDefaultModelsDialogOpen] = useState(false)
-  // While the next chat's snapshot loads there's no runtime to judge by, so the
-  // empty state holds whatever it last was. Dropping it for that gap is what
-  // made one new chat to another fade out and back in. Not for a chat the
-  // sidebar knows has messages, though: that one is headed for a transcript,
-  // and holding the empty state there left the new chat page's list over it
-  // until the snapshot came.
+  // While the next chat's snapshot loads there's no runtime to judge by. A
+  // chat the sidebar lists is judged by the sidebar instead, which puts it to
+  // the same test the snapshot will: a new chat (no message, its first name)
+  // is the new chat page from the first frame, and any other chat is not.
+  // That is what a click on a channel comes back to, a new chat with a draft
+  // waiting or a delegator, and it must not show the new chat page first. A
+  // chat started from this window a moment ago is not listed yet, and is
+  // known to be new all the same.
   //
-  // A chat started from this window a moment ago does not wait either. It is
-  // known to be empty, so its page is the new chat page from the click, until
-  // something is sent from it: that prompt shows before the snapshot can.
+  // A chat neither known nor listed (the sidebar still loading) holds the
+  // empty state as it last was: dropping it for that gap is what made one
+  // new chat to another fade out and back in.
+  //
+  // In every case a prompt sent before the snapshot comes ends the empty state.
   const settledShowEmptyStateRef = useRef(false)
   const isChatLoading = Boolean(state.activeChatId && !state.runtime)
-  const activeChatHasMessages = useSidebarChatHasMessages(state.activeChatId)
+  const sidebarListsChat = useChatExists(state.activeChatId)
+  const isKnownNewChat = useSidebarChatIsNew(state.activeChatId) || state.activeChatStarted
   const showEmptyState = isChatLoading
-    ? state.activeChatStarted
+    ? isKnownNewChat
       ? state.messages.length === 0
-      : settledShowEmptyStateRef.current && !activeChatHasMessages
+      : !sidebarListsChat && settledShowEmptyStateRef.current && state.messages.length === 0
     : state.messages.length === 0 && state.runtime?.title === "New Chat"
   settledShowEmptyStateRef.current = showEmptyState
   const projectId = state.activeProjectId
@@ -619,6 +624,11 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
   // After `setViewerChat` above, in the same commit, so a delegator opened
   // for the first time is never painted with its pane shut.
   const isDelegator = useChatIsDelegator(state.activeChatId)
+  // Which of a project's delegators a click on the project opens, when it has
+  // several (`resolveProjectNewChat`).
+  useEffect(() => {
+    if (isDelegator && state.activeChatId) useDelegateStore.getState().markViewed(state.activeChatId)
+  }, [isDelegator, state.activeChatId])
   const viewerFloorChatId = isDelegator && !isMobileViewport ? state.activeChatId : null
   const setViewerFloor = useViewerStore((store) => store.setFloor)
   useLayoutEffect(() => {
@@ -1055,9 +1065,9 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
   const { delegate: composerDelegate, sendToDelegator } = useNewChatDelegate({
     // Not on a delegator's own empty page: what is typed there is for it.
     // Nor on a page whose chat is still loading, where the empty state is
-    // only being held over from the last page. A chat started here is known
-    // to be empty, so the control is in the composer from its first frame.
-    enabled: showEmptyState && !graphView && (!isChatLoading || state.activeChatStarted) && !isDelegator,
+    // only being held over from the last page. A chat known to be new (see
+    // `showEmptyState`) has the control in its composer from its first frame.
+    enabled: showEmptyState && !graphView && (!isChatLoading || isKnownNewChat) && !isDelegator,
     projectId,
     socket: state.socket,
     dialog: appDialog,

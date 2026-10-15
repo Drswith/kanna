@@ -347,6 +347,7 @@ function KannaLayout() {
       onCollapse={state.collapseSidebar}
       onExpand={state.expandSidebar}
       onCreateChat={handleSidebarCreateChat}
+      onOpenProjectNewChat={state.handleOpenProjectNewChat}
       onCompose={state.handleCompose}
       onForkChat={handleSidebarForkChat}
       currentProjectId={state.activeProjectId}
