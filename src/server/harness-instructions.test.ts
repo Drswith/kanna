@@ -47,8 +47,13 @@ describe("buildKannaSystemInstructions", () => {
     expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Do not redo")
     const named = [...KANNA_DELEGATOR_INSTRUCTIONS.matchAll(/`([a-z_]+)`/g)].map((match) => match[1]!)
     for (const name of named) expect(KANNA_TOOL_NAMES as readonly string[]).toContain(name)
+    // The ticket board's rules: a delegator's only guide to it.
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Every hand-off names a ticket")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Never put progress in it.")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Only `reply_to_ticket` writes on a ticket.")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("One chat, one ticket at a time.")
     // Every delegator turn pays for it.
-    expect(KANNA_DELEGATOR_INSTRUCTIONS.length).toBeLessThan(1_200)
+    expect(KANNA_DELEGATOR_INSTRUCTIONS.length).toBeLessThan(1_700)
   })
 
   test("names only tools that exist", () => {
@@ -161,6 +166,23 @@ test("what holds for every kind is in the description and the session instructio
   expect(instructions).toContain("kanna:themechange")
   expect(instructions).toContain("touch-action: none")
   expect(instructions).not.toContain("<select aria-label")
+  // Two to four options are a segmented control, five to eight a tabs row,
+  // more a dropdown, and both say so.
+  for (const text of [instructions, description]) {
+    expect(text).toMatch(/2 to 4 short options|Two to four short options/)
+    expect(text).toMatch(/for 5 to 8 or for whole views|Five to eight short options, or views to switch between, are a kanna-tabs row/)
+    expect(text).toContain("kanna-select")
+  }
+  // The host centres the selection; the model writes no script for the row.
+  expect(instructions).toContain("scrolls the selected tab to the centre")
+  expect(instructions).toContain("so write no script or CSS of your own for them")
+  expect(instructions).toContain("More than eight, or labels longer than about twenty characters, are a kanna-select dropdown")
+  expect(instructions).toContain('<select class="kanna-select" aria-label="State">')
+  expect(instructions).not.toContain("more than about six options")
+  // Its examples hold three, as a model copying one should.
+  const examples = [...KANNA_VISUALIZATION_CONTRACT.matchAll(/<div class="kanna-segmented"[^>]*>(.*?)<\/div>/g)]
+  expect(examples.length).toBeGreaterThanOrEqual(2)
+  for (const [, options] of examples) expect(options!.match(/<button/g)!.length).toBe(3)
 })
 
 // Claude Code cuts an MCP tool's description at this length and ends it

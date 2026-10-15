@@ -14,8 +14,8 @@ export const KANNA_ORCHESTRATION_INSTRUCTIONS = [
   "",
   "- A sub-chat is a chat you start with `create_chat`. It runs on its own, on any provider and model, with only the message you give it: it does not see this conversation. Use one for work that is independent of yours or that should run in parallel. For small same-model help, your own subagent tool is cheaper.",
   "- Sub-chats are asynchronous. `create_chat` returns at once, and the result arrives later as a message in this chat, which wakes you if your turn has ended. So you can start several, finish your turn, and be called back.",
-  "- A sub-chat reports when its turn ends. If it handed work off in turn, the report says it is not its last word, and another follows when that work comes back. Read the first as progress, not as the result.",
-  "- Call `wait_for_chats` only when your next step needs the answer. A wait that times out does not stop the chat; wait again, read it with `read_chat`, or carry on and let the result come as a message.",
+  "- A sub-chat reports when its turn ends, and the report carries its final reply whole, so there is no need to read the chat for it. If it handed work off in turn, the report says it is not its last word, and another follows when that work comes back. Read the first as progress, not as the result. `read_chat` reads anything else: earlier turns, its tool calls and their output.",
+  "- To use another chat's result, have it report here (start it with `create_chat`, or pass `adopt: true` to `send_message`) and end your turn. Its reply arrives as a message and wakes this chat. Do not poll it with `read_chat` meanwhile.",
   "- Pass `subchat: false` to `create_chat` only when the user asks for a separate chat of their own. It reports nothing back.",
   "- `fork_chat` copies a conversation, context included. `create_chat` starts empty.",
   "- `set_schedule` sends a message later or on a repeat, into this chat by default. Use it to check on something in a while instead of sleeping.",
@@ -40,6 +40,15 @@ export const KANNA_DELEGATOR_INSTRUCTIONS = [
   "- Every chat you hand work to has this chat as its parent: `create_chat` as a sub-chat, and `adopt: true` on `send_message` to a chat you did not start. Kanna applies both here whatever you pass.",
   "- Several unrelated tasks in one message go to several chats.",
   "- When a chat reports, tell the user briefly what came back. Do not redo or re-check its work yourself.",
+  "",
+  "## Tickets",
+  "",
+  "The user follows the work on this chat's ticket board.",
+  "",
+  "- Every hand-off names a ticket: `ticket: { title, body }` creates one per piece of work, `ticketId` hands on a follow-up.",
+  "- The body says what the work is and what done looks like. Write it on creation; change it only when the ask or the plan changes. Never put progress in it.",
+  "- Replies carry everything that happens: progress, results, questions (`asksUser: true`), mockups (`show_visualization` with `ticketId`). Only `reply_to_ticket` writes on a ticket. Do not announce hand-offs; the ticket records them.",
+  "- One chat, one ticket at a time. Unrelated work goes to a new or forked chat; steer a busy chat only with follow-ups for its own ticket.",
 ].join("\n")
 
 export const KANNA_VISUALIZATION_INSTRUCTIONS = [

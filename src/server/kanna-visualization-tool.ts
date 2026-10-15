@@ -13,6 +13,7 @@ const schema = z.strictObject({
   html: z.string().min(1).max(VISUALIZATION_MAX_BYTES).optional().describe("Self-contained HTML fragment, including inline CSS and JavaScript. Supply html or path, not both."),
   path: z.string().min(1).optional().describe("HTML file, absolute or relative to the project. Copied into this chat; source edits will not change the saved visualization."),
   height: z.number().int().min(80).max(VISUALIZATION_MAX_HEIGHT).optional().describe("Initial height in CSS pixels, default 360. The frame then fits the content automatically."),
+  ticketId: z.string().optional().describe("Delegator chats: also post it on this ticket, as a reply."),
 })
 
 /**
@@ -38,6 +39,11 @@ export const SHOW_VISUALIZATION_TOOL: KannaToolDefinition = {
     const args = schema.parse(input)
     if (Boolean(args.html) === Boolean(args.path)) throw new Error("Provide exactly one of html or path.")
     if (!context.dataDir) throw new Error("Chat media storage is unavailable.")
+    // Before anything is written, so a wrong ticket leaves no file behind.
+    if (args.ticketId) {
+      if (!context.orchestration) throw new Error("Tickets are not available in this session.")
+      context.orchestration.checkTicket(context.chatId, args.ticketId)
+    }
     context.signal.throwIfAborted()
     let html = args.html
     if (args.path) {
@@ -66,8 +72,10 @@ export const SHOW_VISUALIZATION_TOOL: KannaToolDefinition = {
       throw error
     }
     const artifact: VisualizationArtifact = { type: "visualization", version: 1, title: args.title, height, url: buildTranscriptMediaUrl(context.chatId, name) }
+    // The ticket's reply points at the same file. The HTML is never copied into the board.
+    if (args.ticketId) await context.orchestration!.replyToTicket(context.chatId, { ticketId: args.ticketId, text: "", artifacts: [artifact] })
     return {
-      content: [{ type: "text", text: "Visualization displayed inline in Kanna. Do not repeat it as an image, file attachment, or visualization marker." }],
+      content: [{ type: "text", text: `Visualization displayed inline in Kanna${args.ticketId ? ` and posted on ticket ${args.ticketId}` : ""}. Do not repeat it as an image, file attachment, or visualization marker.` }],
       structuredContent: { displayed: true, visualization: artifact },
       transcriptContent: [artifact],
     }

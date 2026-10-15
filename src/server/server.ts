@@ -32,6 +32,7 @@ import { TurnFileTracker } from "./worktree-snapshot"
 import { backfillTouchedFileBases } from "./touched-file-backfill"
 import { resumeInterruptedTurns } from "./resume-turns"
 import { ChatOrchestrator } from "./orchestrator"
+import { TicketStore } from "./ticket-store"
 import { createChatCommands } from "./chat-commands"
 import { discoverProjects, type DiscoveredProject } from "./discovery"
 import { KeybindingsManager } from "./keybindings"
@@ -282,10 +283,13 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
   // One set of chat actions for both callers: the router runs them for the
   // user, the orchestrator for an agent.
   const chatCommands = createChatCommands({ store, agent, analytics })
+  const tickets = new TicketStore(store.dataDir)
+  await tickets.initialize()
   const orchestrator = new ChatOrchestrator({
     store,
     agent,
     commands: chatCommands,
+    tickets,
     push: (change) => {
       void router.broadcastChatChange(change)
     },
@@ -338,6 +342,7 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     projectIcons,
     agent,
     chatCommands,
+    tickets: orchestrator,
     terminals,
     portTunnels,
     keybindings,
