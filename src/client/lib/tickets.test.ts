@@ -341,6 +341,27 @@ describe("ticketActivityBlocks", () => {
     expect(handoffs(list).map((block) => [block.at, block.state, block.settledAt])).toEqual([[at(1), "finished", at(9)], [at(5), "finished", at(9)]])
   })
 
+  test("a second message to a chat still working, with nothing between, is the same row", () => {
+    const steered = [event(1, { kind: "closed", by: "delegator" }), event(2, { kind: "sent_to", chatId: "a" }), event(4, { kind: "sent_to", chatId: "a" })]
+    const working = blocks(steered, [], [link("a", "working")])
+    expect(working.map((block) => block.type)).toEqual(["event", "handoff"])
+    expect(handoffs(working)).toMatchObject([{ at: at(2), state: "working" }])
+    // Its one report settles it, once.
+    const settled = handoffs(blocks([...steered, event(9, { kind: "chat_finished", chatId: "a" })], [], [link("a", "finished")]))
+    expect(settled.map((block) => [block.at, block.state, block.settledAt])).toEqual([[at(2), "finished", at(9)]])
+    // Asking in between is not drawn, so it does not split them.
+    expect(handoffs(blocks([event(1, { kind: "sent_to", chatId: "a" }), event(2, { kind: "chat_asking", chatId: "a" }), event(3, { kind: "sent_to", chatId: "a" })]))).toHaveLength(1)
+  })
+
+  test("two outstanding hand-offs to one chat with an event between keep their rows", () => {
+    const list = blocks([event(1, { kind: "sent_to", chatId: "a" }), event(2, { kind: "renamed", from: "Old" }), event(3, { kind: "sent_to", chatId: "a" })], [], [link("a", "working")])
+    expect(list.map((block) => block.type)).toEqual(["handoff", "event", "handoff"])
+  })
+
+  test("hand-offs to two chats in a row are two rows", () => {
+    expect(handoffs(blocks([event(1, { kind: "sent_to", chatId: "a" }), event(2, { kind: "sent_to", chatId: "b" })]))).toHaveLength(2)
+  })
+
   test("a report after a hand-off settled lands on the next one only", () => {
     const list = handoffs(blocks([
       event(1, { kind: "sent_to", chatId: "a" }), event(2, { kind: "chat_finished", chatId: "a" }),
@@ -359,6 +380,9 @@ describe("ticketActivityBlocks", () => {
     ])
     const events = list.flatMap((block) => (block.type === "event" ? [block] : []))
     expect(events.map((block) => block.text)).toEqual(["Closed by you", "Reopened: B started", "Renamed from ‘Old’"])
+    // The delegator's own closes and reopens name it: the chat's title, which may be anything ("Superwall").
+    const byWhom = blocks([event(1, { kind: "closed", by: "delegator" }), event(2, { kind: "reopened", cause: "manual", by: "delegator" }), event(3, { kind: "reopened", cause: "manual", by: "user" })])
+    expect(byWhom.map((block) => (block.type === "event" ? block.text : ""))).toEqual(["Closed by Delegator", "Reopened by Delegator", "Reopened by you"])
     expect(events[1]!.chatId).toBe("b")
     expect(JSON.stringify(list)).not.toContain("Done")
   })

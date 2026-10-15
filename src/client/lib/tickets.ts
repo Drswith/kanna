@@ -269,6 +269,15 @@ export function ticketActivityBlocks(
     }
     const event = item.event
     if (event.kind === "sent_to") {
+      // A second message to a chat still on the first, with nothing between
+      // them (a steer, or a follow-up straight after), is the same piece of
+      // work, which one report will settle: the first row stands for both.
+      // With a reply or an event between, each keeps its own row and point.
+      const last = blocks.at(-1)
+      if (last?.type === "handoff" && last.chatId === event.chatId && open.get(event.chatId)?.includes(last)) {
+        asked.delete(last)
+        continue
+      }
       const block: HandoffBlock = { type: "handoff", key: event.id, at: event.createdAt, chatId: event.chatId, state: "working" }
       blocks.push(block)
       open.set(event.chatId, [...(open.get(event.chatId) ?? []), block])
