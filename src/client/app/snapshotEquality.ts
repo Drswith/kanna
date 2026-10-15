@@ -181,6 +181,7 @@ export function shouldPreserveExistingProjectDiffs(
  */
 function sameTicketBoard(left: ChatSnapshot, right: ChatSnapshot) {
   return left.ticketAttention === right.ticketAttention
+    && left.readDoneTotal === right.readDoneTotal
     && (left.tickets === right.tickets || JSON.stringify(left.tickets) === JSON.stringify(right.tickets))
     && (left.untrackedChatIds === right.untrackedChatIds || JSON.stringify(left.untrackedChatIds) === JSON.stringify(right.untrackedChatIds))
 }

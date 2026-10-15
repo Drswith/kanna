@@ -2,7 +2,7 @@ import { useRef, type ReactNode } from "react"
 import { ChevronRight } from "lucide-react"
 import type { TicketSummary } from "../../../shared/tickets"
 import { formatSidebarAgeLabel } from "../../lib/formatters"
-import { formatTicketFullTime, groupTicketBoard, ticketBoardColumns, ticketWantsUser, type TicketBoardGroup } from "../../lib/tickets"
+import { formatTicketFullTime, groupTicketBoard, olderTicketsNote, ticketBoardColumns, ticketWantsUser, type TicketBoardGroup } from "../../lib/tickets"
 import { useScrollMemory } from "../viewer/scroll-memory"
 import { cn } from "../../lib/utils"
 import { TicketMark } from "./TicketMark"
@@ -102,8 +102,10 @@ export function TicketRow({ ticket, nowMs, onOpen }: { ticket: TicketSummary; no
  * news. Done folds like Other chats, folded until opened, and holds its 10
  * latest and a way to the rest.
  */
-export function TicketBoardList({ tickets, nowMs, onOpenTicket, otherChats, showAllDone, onShowAllDoneChange, doneExpanded, onDoneToggle }: {
+export function TicketBoardList({ tickets, readDoneTotal, nowMs, onOpenTicket, otherChats, showAllDone, onShowAllDoneChange, doneExpanded, onDoneToggle }: {
   tickets: readonly TicketSummary[]
+  /** Every read Done ticket, loaded or not: the snapshot holds only the latest of them. */
+  readDoneTotal?: number
   nowMs: number
   onOpenTicket: (ticketId: string) => void
   /** `expanded` and `onToggle` fold the group: it is folded until opened. */
@@ -119,7 +121,7 @@ export function TicketBoardList({ tickets, nowMs, onOpenTicket, otherChats, show
   doneExpanded: boolean
   onDoneToggle: () => void
 }) {
-  const groups = groupTicketBoard(tickets, { showAllDone })
+  const groups = groupTicketBoard(tickets, { showAllDone, readDoneTotal })
   return (
     <div className="pb-2">
       {groups.map((group) => {
@@ -133,6 +135,7 @@ export function TicketBoardList({ tickets, nowMs, onOpenTicket, otherChats, show
             {...(folds ? { expanded: doneExpanded, onToggle: onDoneToggle } : {})}
           />
           {open ? group.tickets.map((ticket) => <TicketRow key={ticket.id} ticket={ticket} nowMs={nowMs} onOpen={onOpenTicket} />) : null}
+          {open && group.hidden === 0 && group.unloaded > 0 ? <OlderTicketsNote unloaded={group.unloaded} className="mx-1.5 py-1.5 pl-2.5 pr-2.5" /> : null}
           {open && folds && (group.hidden > 0 || showAllDone) ? (
             <button
               type="button"
@@ -187,8 +190,9 @@ export function TicketCard({ ticket, nowMs, onOpen }: { ticket: TicketSummary; n
  * every column shown. Read Done tickets are here too: this is where the
  * whole board is looked at.
  */
-export function TicketBoardColumns({ tickets, nowMs, onOpenTicket, scrollKey }: {
+export function TicketBoardColumns({ tickets, readDoneTotal, nowMs, onOpenTicket, scrollKey }: {
   tickets: readonly TicketSummary[]
+  readDoneTotal?: number
   nowMs: number
   onOpenTicket: (ticketId: string) => void
   /**
@@ -199,7 +203,7 @@ export function TicketBoardColumns({ tickets, nowMs, onOpenTicket, scrollKey }: 
 }) {
   const gridRef = useRef<HTMLDivElement | null>(null)
   useScrollMemory(scrollKey && `${scrollKey}:columns`, gridRef)
-  const columns = ticketBoardColumns(tickets)
+  const columns = ticketBoardColumns(tickets, { readDoneTotal })
   return (
     <div
       ref={gridRef}
@@ -235,6 +239,16 @@ function TicketBoardColumn({ column, nowMs, onOpenTicket, scrollKey }: {
       {column.tickets.length === 0
         ? <p className="mx-1.5 text-xs text-muted-foreground">None</p>
         : column.tickets.map((ticket) => <TicketCard key={ticket.id} ticket={ticket} nowMs={nowMs} onOpen={onOpenTicket} />)}
+      {column.unloaded > 0 ? <OlderTicketsNote unloaded={column.unloaded} className="mx-1.5 mb-1" /> : null}
     </section>
   )
+}
+
+/**
+ * The end of Done when older tickets were left out of the snapshot. Quiet,
+ * and nothing to press: they are still there for a link or the agent's
+ * tools, just not listed.
+ */
+function OlderTicketsNote({ unloaded, className }: { unloaded: number; className?: string }) {
+  return <p className={cn("text-[13px] text-muted-foreground/70", className)}>{olderTicketsNote(unloaded)}</p>
 }

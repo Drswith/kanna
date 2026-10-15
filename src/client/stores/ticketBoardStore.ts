@@ -15,6 +15,12 @@ export interface TicketBoard {
   tickets: TicketSummary[]
   untrackedChatIds: string[]
   attention: number
+  /**
+   * How many read Done tickets there are in all. `tickets` holds only the
+   * latest of them (`SNAPSHOT_READ_DONE_LIMIT`). Absent from a server that
+   * sends them all, and then it is however many `tickets` has.
+   */
+  readDoneTotal?: number
 }
 
 interface TicketBoardState {
@@ -29,12 +35,13 @@ export const useTicketBoardStore = create<TicketBoardState>()(() => ({ boards: {
  * What a chat snapshot says of its board, or null for a chat that has none:
  * an ordinary chat, or a delegator on a server from before tickets.
  */
-export function ticketBoardOf(snapshot: Pick<ChatSnapshot, "tickets" | "untrackedChatIds" | "ticketAttention"> | null): TicketBoard | null {
+export function ticketBoardOf(snapshot: Pick<ChatSnapshot, "tickets" | "untrackedChatIds" | "ticketAttention" | "readDoneTotal"> | null): TicketBoard | null {
   if (!snapshot?.tickets) return null
   return {
     tickets: snapshot.tickets,
     untrackedChatIds: snapshot.untrackedChatIds ?? NO_CHATS,
     attention: snapshot.ticketAttention ?? 0,
+    ...(snapshot.readDoneTotal !== undefined ? { readDoneTotal: snapshot.readDoneTotal } : {}),
   }
 }
 
@@ -47,7 +54,7 @@ export function publishTicketBoard(chatId: string, board: TicketBoard | null) {
     useTicketBoardStore.setState({ boards: rest })
     return
   }
-  if (current && current.tickets === board.tickets && current.untrackedChatIds === board.untrackedChatIds && current.attention === board.attention) return
+  if (current && current.tickets === board.tickets && current.untrackedChatIds === board.untrackedChatIds && current.attention === board.attention && current.readDoneTotal === board.readDoneTotal) return
   useTicketBoardStore.setState((state) => ({ boards: { ...state.boards, [chatId]: board } }))
 }
 
@@ -73,8 +80,9 @@ export function usePublishTicketBoard(snapshot: ChatSnapshot | null) {
   const tickets = snapshot?.tickets
   const untrackedChatIds = snapshot?.untrackedChatIds
   const attention = snapshot?.ticketAttention
+  const readDoneTotal = snapshot?.readDoneTotal
   useLayoutEffect(() => {
     if (!chatId) return
-    publishTicketBoard(chatId, ticketBoardOf({ tickets, untrackedChatIds, ticketAttention: attention }))
-  }, [attention, chatId, tickets, untrackedChatIds])
+    publishTicketBoard(chatId, ticketBoardOf({ tickets, untrackedChatIds, ticketAttention: attention, readDoneTotal }))
+  }, [attention, chatId, readDoneTotal, tickets, untrackedChatIds])
 }

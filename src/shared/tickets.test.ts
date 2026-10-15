@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import {
   deriveTicketState,
   describeTicket,
+  snapshotTickets,
+  SNAPSHOT_READ_DONE_LIMIT,
   summarizeTicket,
   ticketActivity,
   ticketAttentionCount,
@@ -10,6 +12,7 @@ import {
   type TicketChatState,
   type TicketHandoff,
   type TicketRecord,
+  type TicketSummary,
 } from "./tickets"
 
 function ticket(overrides: Partial<TicketRecord> = {}): TicketRecord {
@@ -171,5 +174,27 @@ describe("the ticket whole", () => {
       ],
     }), chats({ a: "finished" }))
     expect(ticketActivity(detail).map((item) => item.type === "reply" ? item.reply.id : item.event.id)).toEqual(["th_1", "th_2", "rp_1"])
+  })
+})
+
+describe("the snapshot's tickets", () => {
+  function done(number: number, unread = false): TicketSummary {
+    return { ...summarize(ticket({ id: `tk_${number}`, number, updatedAt: number, handoffs: [handoff("a", false)] }), { a: "finished" }), unread }
+  }
+
+  test("keeps every open and unread Done ticket, and only the latest read Done ones", () => {
+    const open = summarize(ticket({ id: "tk_open", number: 0, asksUser: true }), {})
+    const list = [open, done(1), done(2, true), done(3), done(4), done(5)]
+    const { tickets, readDoneTotal } = snapshotTickets(list, 2)
+    expect(tickets.map((entry) => entry.id)).toEqual(["tk_open", "tk_2", "tk_4", "tk_5"])
+    expect(readDoneTotal).toBe(4)
+  })
+
+  test("is capped at 100 read Done tickets", () => {
+    expect(SNAPSHOT_READ_DONE_LIMIT).toBe(100)
+    const { tickets, readDoneTotal } = snapshotTickets(Array.from({ length: 120 }, (_, index) => done(index + 1)))
+    expect(tickets).toHaveLength(100)
+    expect(tickets.some((entry) => entry.id === "tk_20")).toBe(false)
+    expect(readDoneTotal).toBe(120)
   })
 })

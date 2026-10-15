@@ -696,11 +696,39 @@ describe("the board on the snapshot", () => {
     const old = await toolsFor(parent)("create_chat", { message: "older work" })
     await store.setChatDelegator(parent, true)
 
-    expect(orchestrator.ticketBoard(parent)).toEqual({ tickets: [], ticketAttention: 0, untrackedChatIds: [old.chatId] })
+    expect(orchestrator.ticketBoard(parent)).toEqual({ tickets: [], ticketAttention: 0, untrackedChatIds: [old.chatId], readDoneTotal: 0 })
     const tracked = await toolsFor(parent)("create_chat", { message: "new work", ticket: { title: "New" } })
     const board = orchestrator.ticketBoard(parent)!
     expect(board.untrackedChatIds).toEqual([old.chatId])
     expect(board.tickets).toMatchObject([{ title: "New", chats: [{ chatId: tracked.chatId, outstanding: true }] }])
+  })
+
+  test("holds the latest 100 read Done tickets, and the rest stay readable", async () => {
+    const { startChat, toolsFor, orchestrator } = await setup()
+    const delegator = await startChat()
+    const call = toolsFor(delegator)
+    const { ticketId: openId } = await call("create_ticket", { title: "Still open" })
+    const ids: string[] = []
+    for (let index = 0; index < 103; index += 1) {
+      const { ticketId } = await call("create_ticket", { title: `Done ${index + 1}` })
+      await call("update_ticket", { ticketId, status: "done" })
+      ids.push(ticketId)
+    }
+    // The first two are never read: Ready for review, so never cut.
+    for (const ticketId of ids.slice(2)) await orchestrator.setTicketReadAsUser({ chatId: delegator, ticketId, read: true })
+
+    const board = orchestrator.ticketBoard(delegator)!
+    const shown = new Set(board.tickets.map((ticket) => ticket.id))
+    expect(board.readDoneTotal).toBe(101)
+    expect(board.tickets.filter((ticket) => ticket.state === "done" && !ticket.unread)).toHaveLength(100)
+    expect(shown.has(openId) && shown.has(ids[0]!) && shown.has(ids[1]!)).toBe(true)
+    // The oldest read one is the one left out, and a link to it still opens it.
+    expect(shown.has(ids[2]!)).toBe(false)
+    expect(orchestrator.ticketDetail(delegator, ids[2]!)).toMatchObject({ id: ids[2], title: "Done 3" })
+    expect(await call("read_ticket", { ticketId: ids[2] })).toMatchObject({ ticketId: ids[2], title: "Done 3" })
+    const listed = await call("list_tickets", { status: "done", limit: 200 })
+    expect(listed.total).toBe(103)
+    expect(listed.tickets.map((ticket: { ticketId: string }) => ticket.ticketId)).toContain(ids[2])
   })
 
   test("read_ticket and list_tickets give the agent the ticket and its chats", async () => {

@@ -2731,6 +2731,12 @@ export interface ChatSnapshot {
    * started before it had a board. The board lists them under "Other chats".
    */
   untrackedChatIds?: string[]
+  /**
+   * On a delegator: how many read Done tickets it has in all. `tickets`
+   * carries only the latest `SNAPSHOT_READ_DONE_LIMIT` of them, so the list
+   * counts with this and says that older ones are not shown.
+   */
+  readDoneTotal?: number
 }
 
 /** One turn of a chat, as the outline names it. */

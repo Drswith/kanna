@@ -55,6 +55,17 @@ export interface TicketBoardGroup {
   tickets: TicketSummary[]
   /** Done's older tickets, behind "Show N more". */
   hidden: number
+  /**
+   * Done's tickets older still, that the snapshot did not carry
+   * (`SNAPSHOT_READ_DONE_LIMIT`): counted in `total`, never listed.
+   */
+  unloaded: number
+}
+
+/** Done's count: all of its tickets, the ones the snapshot left out included. */
+function doneCounts(loaded: number, readDoneTotal: number | undefined) {
+  const total = Math.max(loaded, readDoneTotal ?? loaded)
+  return { total, unloaded: total - loaded }
 }
 
 function sectionTickets(tickets: readonly TicketSummary[], section: TicketBoardSection): TicketSummary[] {
@@ -70,20 +81,25 @@ export const RECENT_DONE_SHOWN = 10
  * delegator's Done is most of its board within a day. Done is read tickets
  * only, the unread ones being in Ready for review, so nothing in it is news.
  */
-export function groupTicketBoard(tickets: readonly TicketSummary[], { showAllDone = false } = {}): TicketBoardGroup[] {
+export function groupTicketBoard(
+  tickets: readonly TicketSummary[],
+  { showAllDone = false, readDoneTotal }: { showAllDone?: boolean; readDoneTotal?: number } = {},
+): TicketBoardGroup[] {
   return SECTION_ORDER.flatMap((section) => {
     const list = sectionTickets(tickets, section)
-    if (list.length === 0) return []
+    const { total, unloaded } = section === "done" ? doneCounts(list.length, readDoneTotal) : { total: list.length, unloaded: 0 }
+    if (total === 0) return []
     const shown = section === "done" && !showAllDone ? list.slice(0, RECENT_DONE_SHOWN) : list
-    return [{ section, label: TICKET_SECTION_LABELS[section], total: list.length, tickets: shown, hidden: list.length - shown.length }]
+    return [{ section, label: TICKET_SECTION_LABELS[section], total, tickets: shown, hidden: list.length - shown.length, unloaded }]
   })
 }
 
 /**
  * Every ticket, in the order stepping goes through them from an open one
  * (the ↑ and ↓ in its header, k and j): the list's sections, top to
- * bottom, with all of Done in it, folded or behind "Show N more" or not, so
- * a step reaches each one. The delegator's other chats are not tickets, and are not in it.
+ * bottom, with all of Done the snapshot carries in it, folded or behind
+ * "Show N more" or not, so a step reaches each loaded one. A ticket opened
+ * by a link from further back is outside it: it has no neighbours. The delegator's other chats are not tickets, and are not in it.
  */
 export function ticketStepOrder(tickets: readonly TicketSummary[]): string[] {
   return groupTicketBoard(tickets, { showAllDone: true }).flatMap((group) => group.tickets.map((ticket) => ticket.id))
@@ -103,12 +119,18 @@ export function adjacentTicketId(order: readonly string[], ticketId: string, dir
  * has tickets: it is the exception, and an empty column for it would be a
  * quarter of the board standing for nothing.
  */
-export function ticketBoardColumns(tickets: readonly TicketSummary[]): TicketBoardGroup[] {
+export function ticketBoardColumns(tickets: readonly TicketSummary[], { readDoneTotal }: { readDoneTotal?: number } = {}): TicketBoardGroup[] {
   return SECTION_ORDER.flatMap((section) => {
     const list = sectionTickets(tickets, section)
     if (section === "waiting_on_you" && list.length === 0) return []
-    return [{ section, label: TICKET_SECTION_LABELS[section], total: list.length, tickets: list, hidden: 0 }]
+    const { total, unloaded } = section === "done" ? doneCounts(list.length, readDoneTotal) : { total: list.length, unloaded: 0 }
+    return [{ section, label: TICKET_SECTION_LABELS[section], total, tickets: list, hidden: 0, unloaded }]
   })
+}
+
+/** What ends a Done list the snapshot cut short: quiet, with nothing to press. */
+export function olderTicketsNote(unloaded: number): string {
+  return `${unloaded.toLocaleString()} older ${unloaded === 1 ? "ticket isn't" : "tickets aren't"} shown`
 }
 
 /**

@@ -89,11 +89,12 @@ export const TicketBoardPane = memo(function TicketBoardPane({ delegatorChatId, 
           No tickets yet. Each piece of work this delegator hands out gets one here.
         </p>
       ) : expanded ? (
-        <TicketBoardColumns tickets={board.tickets} nowMs={nowMs} onOpenTicket={openTicket} scrollKey={`tickets:${delegatorChatId}`} />
+        <TicketBoardColumns tickets={board.tickets} readDoneTotal={board.readDoneTotal} nowMs={nowMs} onOpenTicket={openTicket} scrollKey={`tickets:${delegatorChatId}`} />
       ) : (
         <div className={VIEWER_END_PAD_CLASS}>
           <TicketBoardList
             tickets={board.tickets}
+            readDoneTotal={board.readDoneTotal}
             nowMs={nowMs}
             onOpenTicket={openTicket}
             otherChats={otherRows ? { count: others.length, rows: otherRows, expanded: othersExpanded, onToggle: () => setSectionExpanded(OTHER_CHATS_SECTION, !othersExpanded) } : null}

@@ -352,6 +352,33 @@ export function ticketActivity(ticket: Pick<TicketDetail, "replies" | "history">
   return items.sort((a, b) => a.at - b.at || (a.type === b.type ? 0 : a.type === "history" ? -1 : 1))
 }
 
+/**
+ * How many read Done tickets a delegator's chat snapshot carries: the latest
+ * by activity. The board is sent whole on every change, and Done is most of
+ * it before long, so past this the oldest stay in the store and are left out
+ * of the snapshot. A link still opens one (the `ticket` topic reads the
+ * store), and the ticket tools still reach them all.
+ */
+export const SNAPSHOT_READ_DONE_LIMIT = 100
+
+/**
+ * The board as the snapshot carries it: every ticket that is not Done, every
+ * unread Done one (nothing waiting to be read is dropped), and the latest
+ * `limit` read Done ones. `readDoneTotal` is how many read Done tickets
+ * there are in all, for the list's count.
+ */
+export function snapshotTickets(
+  tickets: readonly TicketSummary[],
+  limit = SNAPSHOT_READ_DONE_LIMIT,
+): { tickets: TicketSummary[]; readDoneTotal: number } {
+  const readDone = tickets.filter((ticket) => ticket.state === "done" && !ticket.unread)
+  const kept = new Set([...readDone].sort(compareTicketsByActivity).slice(0, limit).map((ticket) => ticket.id))
+  return {
+    tickets: tickets.filter((ticket) => ticket.state !== "done" || ticket.unread || kept.has(ticket.id)),
+    readDoneTotal: readDone.length,
+  }
+}
+
 /** Board order within a column: latest activity first. */
 export function compareTicketsByActivity(a: Pick<TicketSummary, "updatedAt" | "number">, b: Pick<TicketSummary, "updatedAt" | "number">) {
   return b.updatedAt - a.updatedAt || b.number - a.number

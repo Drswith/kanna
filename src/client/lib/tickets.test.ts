@@ -7,6 +7,7 @@ import {
   formatTicketNumbers,
   groupTicketBoard,
   handoffTicketOf,
+  olderTicketsNote,
   opensTicketInPane,
   parseTicketLink,
   readTicketLinkParam,
@@ -104,6 +105,19 @@ describe("groupTicketBoard", () => {
 
   test("leaves out empty sections", () => {
     expect(groupTicketBoard([summary(1, "done"), summary(2, "in_progress")]).map((group) => group.section)).toEqual(["in_progress", "done"])
+  })
+
+  test("Done counts the read Done tickets the snapshot left out, and says so at its end", () => {
+    const done = groupTicketBoard(manyDone, { showAllDone: true, readDoneTotal: 150 }).find((group) => group.section === "done")!
+    expect(done.total).toBe(150)
+    expect(done.tickets).toHaveLength(14)
+    expect(done.unloaded).toBe(136)
+    expect(olderTicketsNote(done.unloaded)).toBe("136 older tickets aren't shown")
+    expect(olderTicketsNote(1)).toBe("1 older ticket isn't shown")
+    // A total behind the loaded list (a push between the two) never goes below what is there.
+    expect(sectionOf(manyDone, "done")!.unloaded).toBe(0)
+    expect(groupTicketBoard(manyDone, { readDoneTotal: 3 }).find((group) => group.section === "done")!.total).toBe(14)
+    expect(ticketBoardColumns(manyDone, { readDoneTotal: 150 }).find((column) => column.section === "done")).toMatchObject({ total: 150, unloaded: 136 })
   })
 
   test("the full board keeps In progress, Ready for review and Done, and has Waiting on you only while it has tickets", () => {

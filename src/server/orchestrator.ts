@@ -16,6 +16,7 @@ import { renderToolResultContent } from "./handoff"
 import { getServerProviderCatalog, SERVER_PROVIDERS } from "./provider-catalog"
 import {
   compareTicketsByActivity,
+  snapshotTickets,
   ticketAttentionCount,
   ticketLinkPath,
   type TicketArtifact,
@@ -2200,15 +2201,19 @@ export class ChatOrchestrator {
   // Reads for the snapshots.
 
   /** The board on a delegator's chat snapshot. Null for any other chat. */
-  ticketBoard(chatId: string): { tickets: ReturnType<TicketBoard["summaries"]>; ticketAttention: number; untrackedChatIds: string[] } | null {
+  ticketBoard(chatId: string): { tickets: ReturnType<TicketBoard["summaries"]>; ticketAttention: number; untrackedChatIds: string[]; readDoneTotal: number } | null {
     const chat = this.store.getChat(chatId)
     if (!this.tickets || !chat?.delegator) return null
-    const tickets = this.tickets.summaries(chatId)
+    const all = this.tickets.summaries(chatId)
     const children = this.childrenOf(chatId).map((child) => child.id)
+    // Capped to the latest read Done tickets (`snapshotTickets`). The count
+    // is of all of them: what waits on the user is never what is cut.
+    const { tickets, readDoneTotal } = snapshotTickets(all)
     return {
       tickets,
-      ticketAttention: ticketAttentionCount(tickets),
+      ticketAttention: ticketAttentionCount(all),
       untrackedChatIds: this.tickets.untracked(chatId, children),
+      readDoneTotal,
     }
   }
 
