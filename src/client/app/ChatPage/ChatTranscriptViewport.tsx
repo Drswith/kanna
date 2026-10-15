@@ -10,11 +10,10 @@ import {
 import { ArrowDown, Flower, Upload } from "lucide-react"
 import { DrainingIndicator } from "../../components/messages/DrainingIndicator"
 import { QueuedUserMessage } from "../../components/messages/QueuedUserMessage"
-import { delegationsFor, noteDelegation } from "../../components/messages/SourcedMessage"
 import { messageNamingParent, ParentChatLink } from "../../components/messages/ParentChatLink"
 import { ReplyQuoteProjectContext } from "../../components/messages/ChatToolMessage"
+import { TicketTranscriptProvider } from "../../components/tickets/ticket-transcript"
 import { useParentChatId, useProjectIdForChat } from "../../stores/sidebarStore"
-import type { ChatToolCall } from "../../components/messages/ChatToolMessage"
 import { OpenLocalLinkProvider, type OpenLocalLinkTarget } from "../../components/messages/shared"
 import { ProcessingMessage } from "../../components/messages/ProcessingMessage"
 import { ContextMenu, ContextMenuTrigger } from "../../components/ui/context-menu"
@@ -532,15 +531,6 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
     latestToolIds,
   }), [isProcessing, latestToolIds, localPath, messages])
   const resolvedRows = useStableResolvedRows(rawRows)
-
-  // The calls a queued report answers, for the quote in its bubble. The queue
-  // comes after everything loaded, so the newest call to each chat is the one.
-  const queuedDelegations = useMemo(() => {
-    if (!queuedMessages.some((message) => message.source?.kind === "report")) return null
-    const latest = new Map<string, ChatToolCall>()
-    for (const message of messages) noteDelegation(latest, message)
-    return latest
-  }, [messages, queuedMessages])
 
   useEffect(() => {
     setToolGroupExpanded({})
@@ -1263,7 +1253,6 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
         <QueuedUserMessage
           key={message.id}
           message={message}
-          delegations={queuedDelegations ? delegationsFor(queuedDelegations, message.source) : undefined}
           onRemove={() => onRemoveQueuedMessage(message.id)}
           onSendNow={() => onSteerQueuedMessage(message.id)}
         />
@@ -1283,6 +1272,7 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
     <>
       <OpenLocalLinkProvider onOpenLocalLink={handleOpenLocalLinkClick}>
         <ReplyQuoteProjectContext.Provider value={currentProjectId}>
+        <TicketTranscriptProvider chatId={activeChatId} messages={messages}>
         <MessageScroller className="h-full flex-1">
           <MessageScrollerViewport
             ref={viewportRef}
@@ -1308,6 +1298,7 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
             </MessageScrollerContent>
           </MessageScrollerViewport>
         </MessageScroller>
+        </TicketTranscriptProvider>
         </ReplyQuoteProjectContext.Provider>
       </OpenLocalLinkProvider>
 
