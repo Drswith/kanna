@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { FOCUS_FALLBACK_IGNORE_ATTRIBUTE } from "../../app/chatFocusPolicy"
 import { isEscapeClaimed, resolveEscapePress, VIEWER_FIELDS_KEEP_ESCAPE_ATTRIBUTE } from "../../lib/escape-key"
 import { cn } from "../../lib/utils"
+import { useScrollMemory } from "./scroll-memory"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 
 /**
@@ -162,8 +163,6 @@ function isTypingTarget(target: EventTarget | null) {
   return target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT"
 }
 
-/** Where each remembered body was left; see `scrollMemoryKey`. */
-const scrollMemory = new Map<string, number>()
 
 export interface ViewerNavigation {
   index: number
@@ -281,15 +280,7 @@ export function ViewerSurface({
   }, [scrollKey])
 
   // Before paint, so the list is never seen at its top first.
-  useLayoutEffect(() => {
-    const body = bodyRef.current
-    if (!scrollMemoryKey || !body) return
-    const remembered = scrollMemory.get(scrollMemoryKey)
-    if (remembered) body.scrollTop = remembered
-    const remember = () => scrollMemory.set(scrollMemoryKey, body.scrollTop)
-    body.addEventListener("scroll", remember, { passive: true })
-    return () => body.removeEventListener("scroll", remember)
-  }, [scrollMemoryKey])
+  useScrollMemory(scrollMemoryKey, bodyRef)
 
   // Focus comes here on open, so its keys work at once and nothing behind
   // (the composer, now inert) keeps it. A card that asks to be quiet about
