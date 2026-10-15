@@ -4,7 +4,6 @@ import type {
   TicketDetail,
   TicketHistoryEvent,
   TicketRecord,
-  TicketReply,
   TicketState,
   TicketSummary,
 } from "../shared/tickets"
@@ -57,14 +56,20 @@ function howToAnswer(ticketId: string) {
 }
 
 /**
- * The hidden header on a user's ticket reply delivered to the delegator.
- * `before` is the ticket's state before the reply landed, which says whether
- * the reply reopened it.
+ * What the delegator is told with a user's ticket reply: a wire-only turn
+ * notice (`buildTurnNotices`), after what the user wrote, so the prompt
+ * starts with their words, a `/skill` included, as a chat message does.
+ *
+ * `ticket` is the ticket as it stands when the turn starts, and its state is
+ * what the delegator is told: a reply answers a question (`asksUser`
+ * clears), so the state from before it would say the ticket still waits on
+ * the user when it now waits on the delegator. `reopenedByReply` says the
+ * reply took it out of Done.
  */
-export function buildTicketReplyHeader(ticket: TicketSummary, before: TicketState) {
-  const state = before === "done"
+export function buildTicketReplyHeader(ticket: TicketSummary, reopenedByReply: boolean) {
+  const state = reopenedByReply
     ? "It was Done, and this reply reopened it."
-    : `It is ${STATE_WORDS[before]}.`
+    : `It is ${STATE_WORDS[ticket.state]}.`
   return [
     "<system-message>",
     `The user replied on ticket ${ticketLabel(ticket)}, in the ticket and not in this chat. ${state}`,
@@ -74,11 +79,6 @@ export function buildTicketReplyHeader(ticket: TicketSummary, before: TicketStat
   ].join("\n")
 }
 
-/** The whole message a user's ticket reply becomes: the header, then what they wrote. */
-export function buildTicketReplyMessage(ticket: TicketSummary, before: TicketState, reply: Pick<TicketReply, "text">) {
-  const header = buildTicketReplyHeader(ticket, before)
-  return reply.text ? `${header}\n\n${reply.text}` : header
-}
 
 /** What the delegator is told when the user reopens a Done ticket by hand. */
 export function buildTicketReopenMessage(ticket: TicketSummary) {

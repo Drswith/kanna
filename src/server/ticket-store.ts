@@ -33,8 +33,13 @@ export type TicketStoreEvent = { v: typeof TICKET_LOG_VERSION; at: number } & (
   | { type: "reply_added"; reply: TicketReply }
   | { type: "history_added"; event: TicketHistoryEvent }
   | { type: "handoff_added"; handoff: TicketHandoff }
-  /** The chat's outstanding hand-offs are settled: all of them, or those on `ticketIds`. */
-  | { type: "handoffs_settled"; childChatId: string; ticketIds?: string[] }
+  /** A hand-off's message went into the chat's queue, or into a turn of it. */
+  | { type: "handoff_delivered"; ticketId: string; delegationId: string; turn?: number; queuedMessageId?: string }
+  /**
+   * The chat's outstanding hand-offs are settled: all of them, those on
+   * `ticketIds`, or exactly `delegationIds`.
+   */
+  | { type: "handoffs_settled"; childChatId: string; ticketIds?: string[]; delegationIds?: string[] }
   /** `closed: null` drops the closure. */
   | { type: "flags_set"; ticketId: string; asksUser?: boolean; awaitingDelegator?: boolean; closed?: TicketClosure | null }
   | { type: "read_set"; ticketId: string; readAt: number | null }
@@ -83,10 +88,13 @@ export function applyTicketEvent(tickets: Map<string, TicketRecord>, delegatorCh
     }
     case "handoffs_settled": {
       const only = event.ticketIds ? new Set(event.ticketIds) : null
+      const exactly = event.delegationIds ? new Set(event.delegationIds) : null
       for (const ticket of tickets.values()) {
         if (only && !only.has(ticket.id)) continue
         for (const handoff of ticket.handoffs) {
-          if (handoff.childChatId === event.childChatId) handoff.outstanding = false
+          if (handoff.childChatId !== event.childChatId) continue
+          if (exactly && !exactly.has(handoff.delegationId)) continue
+          handoff.outstanding = false
         }
       }
       return
@@ -96,6 +104,8 @@ export function applyTicketEvent(tickets: Map<string, TicketRecord>, delegatorCh
     ? event.reply.ticketId
     : event.type === "history_added"
       ? event.event.ticketId
+      : event.type === "handoff_delivered"
+        ? event.ticketId
       : event.type === "handoff_added"
         ? event.handoff.ticketId
         : event.ticketId
@@ -120,6 +130,13 @@ export function applyTicketEvent(tickets: Map<string, TicketRecord>, delegatorCh
     case "handoff_added":
       ticket.handoffs.push({ ...event.handoff })
       return
+    case "handoff_delivered": {
+      const handoff = ticket.handoffs.find((candidate) => candidate.delegationId === event.delegationId)
+      if (!handoff) return
+      if (event.turn !== undefined) handoff.turn = event.turn
+      if (event.queuedMessageId !== undefined) handoff.queuedMessageId = event.queuedMessageId
+      return
+    }
     case "flags_set":
       if (event.asksUser !== undefined) ticket.asksUser = event.asksUser
       if (event.awaitingDelegator !== undefined) ticket.awaitingDelegator = event.awaitingDelegator

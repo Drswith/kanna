@@ -24,13 +24,14 @@ import {
   type TicketState,
 } from "../shared/tickets"
 import type { ChatAttachment } from "../shared/types"
+import type { ClientCommand } from "../shared/protocol"
 import { TicketBoard } from "./ticket-board"
 import {
   agentTicketDetail,
   agentTicketSummary,
   buildTicketNudge,
   buildTicketReopenMessage,
-  buildTicketReplyMessage,
+  buildTicketReplyHeader,
   ticketReportLine,
 } from "./ticket-messages"
 import type { TicketStore } from "./ticket-store"
@@ -41,6 +42,9 @@ import {
   ScheduleRunner,
   type ScheduleFireResult,
 } from "./schedules"
+
+/** A composer's settings for a turn, as `chat.send` carries them: what a ticket reply runs the delegator with. */
+type TurnSettings = Partial<Pick<Extract<ClientCommand, { type: "chat.send" }>, "provider" | "model" | "modelOptions" | "planMode" | "autoPlan">>
 
 /**
  * What an agent can do to chats, and the rules that keep that safe.
@@ -377,6 +381,11 @@ export class ChatOrchestrator {
   private bootSweep: ReturnType<typeof setTimeout> | null = null
   /** Delegators' ticket boards. Null when the orchestrator was built without a ticket store. */
   readonly tickets: TicketBoard | null
+  /**
+   * Hand-offs whose send has not returned. Until it does, nothing knows
+   * whether the message went into a turn or the queue (`placeHandoff`).
+   */
+  private readonly sendingHandoffs = new Set<string>()
 
   constructor(args: OrchestratorArgs) {
     this.store = args.store
@@ -1014,7 +1023,7 @@ export class ChatOrchestrator {
     } else if (ticket) {
       // A copy with no message has no work yet and owes nothing, but it is
       // the ticket's: the hand-off is what links it.
-      const record = await this.startHandoff(actorChatId, ticket, chat.id, { outstanding: false })
+      const { ticket: record } = await this.startHandoff(actorChatId, ticket, chat.id, { outstanding: false })
       handedOff = { id: record.id, number: record.number }
     }
     this.push({ ...forked.changed, chatIds: [chat.id] })
@@ -1159,8 +1168,10 @@ export class ChatOrchestrator {
     // that end is what sends the report.
     if (options.report) await this.store.setReportOwed(target.id, true)
     let ticket: TicketRecord | null = null
+    let delegationId: string | null = null
     try {
-      if (options.ticket) ticket = await this.startHandoff(actorChatId, options.ticket, target.id)
+      if (options.ticket) ({ ticket, delegationId } = await this.startHandoff(actorChatId, options.ticket, target.id))
+      if (delegationId) this.sendingHandoffs.add(delegationId)
       const handedOff = ticket ? { ticket: { id: ticket.id, number: ticket.number } } : {}
       if (options.steer) {
         const { provider, model, effort, planMode, autoPlan } = run
@@ -1169,17 +1180,60 @@ export class ChatOrchestrator {
           { type: "message.enqueue", chatId: target.id, content, provider, model, planMode, autoPlan, steer: true },
           { source, effort },
         )
+        if (delegationId) await this.placeHandoff(actorChatId, target.id, delegationId)
         return handedOff
       }
       const sent = await this.commands.send({ type: "chat.send", chatId: target.id, content, ...run }, { source })
-      return "queued" in sent.result ? { queuedMessageId: sent.result.queuedMessageId, ...handedOff } : handedOff
+      const queuedMessageId = "queued" in sent.result ? sent.result.queuedMessageId : undefined
+      if (delegationId) await this.placeHandoff(actorChatId, target.id, delegationId, queuedMessageId)
+      return queuedMessageId ? { queuedMessageId, ...handedOff } : handedOff
     } catch (error) {
       if (options.report) await this.store.setReportOwed(target.id, false).catch(() => {})
-      if (ticket) await this.tickets?.settle(actorChatId, target.id, [ticket.id]).catch(() => {})
+      if (delegationId) await this.tickets?.settle(actorChatId, target.id, [delegationId]).catch(() => {})
       // An inline ticket was made all the same. Retrying with it again would make a second.
       const retry = ticket ? ` The hand-off was recorded on ticket #${ticket.number}; pass ticketId "${ticket.id}" to try again.` : ""
       throw new Error(`Chat ${target.id} exists, but its turn did not start: ${errorMessage(error)}${retry}`)
+    } finally {
+      if (delegationId) this.sendingHandoffs.delete(delegationId)
     }
+  }
+
+  /**
+   * Says where a hand-off's message went once its send returns: into the
+   * chat's queue, or into the turn it started or was steered into. Placed
+   * here and not by the turn's start (`placeQueuedHandoffs`), because the
+   * send is what knows which message is this hand-off's.
+   */
+  private async placeHandoff(actorChatId: string, childChatId: string, delegationId: string, queuedMessageId?: string) {
+    const board = this.tickets
+    const handoff = board?.findHandoff(actorChatId, delegationId)
+    if (!board || !handoff || handoff.turn !== null) return
+    // Still waiting: the turn that takes it from the queue places it.
+    if (queuedMessageId && this.store.getQueuedMessage(childChatId, queuedMessageId)) {
+      await board.delivered(actorChatId, [handoff], { queuedMessageId })
+      return
+    }
+    await board.delivered(actorChatId, [handoff], { turn: this.store.getChat(childChatId)?.turnCount ?? 0 })
+  }
+
+  /**
+   * A turn of the chat began: the hand-offs whose queued message it took
+   * are its. A message gone from the queue was taken by this turn, which
+   * starts right after the message leaves it.
+   */
+  private placeQueuedHandoffs(chat: ChatRecord) {
+    const board = this.tickets
+    if (!board || !chat.parentChatId) return
+    const taken = board.queuedFor(chat.parentChatId, chat.id).filter((handoff) => (
+      handoff.queuedMessageId
+        ? !this.store.getQueuedMessage(chat.id, handoff.queuedMessageId)
+        // A send still under way places its own hand-off when it returns.
+        : !this.sendingHandoffs.has(handoff.delegationId)
+    ))
+    if (taken.length === 0) return
+    void board.delivered(chat.parentChatId, taken, { turn: chat.turnCount ?? 0 }).catch((error) => {
+      this.onError(`could not place hand-offs to chat ${chat.id} in its turn: ${errorMessage(error)}`)
+    })
   }
 
   async cancelChat(actorChatId: string, chatId: string) {
@@ -1514,7 +1568,10 @@ export class ChatOrchestrator {
       }
     }
     if (owed && chat?.parentChatId) this.owedTurns.add(chatId)
-    if (endedTurnOwed) void this.reportEndedTurn(chatId)
+    // The turn that ended is the one before this one. It is reported, and its
+    // hand-offs settled, before this turn's are placed and could be counted in.
+    if (endedTurnOwed) void this.reportEndedTurn(chatId, (chat?.turnCount ?? 1) - 1)
+    if (chat) this.placeQueuedHandoffs(chat)
     this.pushChatsAbove(chatId)
   }
 
@@ -1524,9 +1581,12 @@ export class ChatOrchestrator {
    * and its board, which puts them in Waiting on you, is pushed.
    */
   handleWaitingForUser(chatId: string) {
-    const parentChatId = this.store.getChat(chatId)?.parentChatId
-    if (!parentChatId || !this.tickets) return
-    void this.tickets.recordChatEvent(parentChatId, chatId, "chat_asking").then(
+    const chat = this.store.getChat(chatId)
+    const parentChatId = chat?.parentChatId
+    if (!chat || !parentChatId || !this.tickets) return
+    // The tickets whose work is in this turn or before it, not those still queued.
+    const { tickets } = this.tickets.coveredBy(parentChatId, chatId, chat.turnCount ?? 0, { final: true, sending: this.sendingHandoffs })
+    void this.tickets.recordAsking(parentChatId, chatId, tickets).then(
       () => this.push({ sidebar: true, chatIds: [parentChatId] }),
       (error) => this.onError(`could not note on its tickets that chat ${chatId} is asking: ${errorMessage(error)}`),
     )
@@ -1662,6 +1722,9 @@ export class ChatOrchestrator {
     } else if (source?.kind === "schedule") {
       const schedule = this.store.getSchedule(source.scheduleId)
       notices.push(`<system-message>This message was sent by the schedule "${schedule?.name ?? "unknown"}" (schedule id ${source.scheduleId}), not typed by the user just now.${agentNote}</system-message>`)
+    } else if (source?.kind === "ticket" && source.replyId) {
+      const notice = this.ticketReplyNotice(chatId, source.ticketId, source.replyId)
+      if (notice) notices.push(notice)
     }
     // An adopted chat is listed only while a result from it is still to come.
     const running = this.childrenOf(chatId).filter((child) => this.isLive(child.id) && (!child.adopted || this.isReportDue(child)))
@@ -1673,6 +1736,22 @@ export class ChatOrchestrator {
       ].join("\n"))
     }
     return notices
+  }
+
+  /**
+   * The header for the user's reply on a ticket: which ticket, how it stands
+   * now, its chats, and how to answer. Wire-only, like every notice here,
+   * so the stored prompt is just what the user wrote and goes to the harness
+   * as a chat message does, with a leading `/skill` still leading. Null for
+   * a ticket or reply no longer on the board.
+   */
+  private ticketReplyNotice(chatId: string, ticketId: string, replyId: string): string | null {
+    const ticket = this.tickets?.get(chatId, ticketId)
+    const reply = ticket?.replies.find((candidate) => candidate.id === replyId)
+    if (!this.tickets || !ticket || !reply) return null
+    // A reply on a Done ticket reopens it in the same moment it lands.
+    const reopened = ticket.history.some((event) => event.kind === "reopened" && event.cause === "user_reply" && event.createdAt === reply.createdAt)
+    return buildTicketReplyHeader(this.tickets.summary(ticket), reopened)
   }
 
   // ── Reports ────────────────────────────────────────────────────────────
@@ -1702,7 +1781,7 @@ export class ChatOrchestrator {
    * The reply goes whole, up to `REPORT_TEXT_LIMIT`. `replyReported` is a
    * close-out after an interim report that already carried the same reply.
    */
-  private buildSection(parentChatId: string, chat: ChatRecord, options?: { replyReported?: boolean }): ReportSection {
+  private buildSection(parentChatId: string, chat: ChatRecord, options?: { replyReported?: boolean; tickets?: readonly TicketRecord[] }): ReportSection {
     // Adopted by another chat since this report was owed. The result goes
     // there now, so this parent gets the news instead, in the same shape.
     const adopter = chat.parentChatId && chat.parentChatId !== parentChatId ? this.store.getChat(chat.parentChatId) : null
@@ -1711,9 +1790,10 @@ export class ChatOrchestrator {
     }
     const outcome = this.outcomeOf(chat)
     const lines = [`Sub-chat ${outcome.status}: [${chat.title}](${chatLink(chat.id)}) (chat id ${chat.id})`]
-    // A delegator's: the tickets this chat's hand-offs belong to. Second, so
+    // A delegator's: the tickets of the hand-offs the reported turns handled
+    // (`TicketBoard.coveredBy`). Second, so
     // the status line stays first for the clients that read it.
-    const awaiting = this.tickets?.ticketsAwaiting(parentChatId, chat.id) ?? []
+    const awaiting = options?.tickets ?? []
     const tickets = ticketReportLine(awaiting)
     if (tickets) lines.push(tickets)
     const ticketIds = awaiting.length ? { ticketIds: awaiting.map((ticket) => ticket.id) } : {}
@@ -1812,8 +1892,11 @@ export class ChatOrchestrator {
       this.cancelCloseOut(chatId)
     }
     const parentChatId = chat.parentChatId
+    // Every turn up to the last has ended, so this report covers their
+    // hand-offs. Only a last word settles them: an interim one names them.
+    const covered = this.tickets?.coveredBy(parentChatId, chatId, chat.turnCount ?? 0, { final: !waiting, sending: this.sendingHandoffs })
     // Written now, from the turn that earned it, before anything can change.
-    const section = this.buildSection(parentChatId, chat, { replyReported: chat.reportedThrough === through })
+    const section = this.buildSection(parentChatId, chat, { replyReported: chat.reportedThrough === through, tickets: covered?.tickets })
     // This report covers the turn that ended last. See `owedTurns`.
     this.owedTurns.delete(chatId)
     this.reporting.add(chatId)
@@ -1824,10 +1907,12 @@ export class ChatOrchestrator {
       } else {
         await this.store.setReportOwed(chatId, false)
         this.watchForLaterTurn(chatId)
-        // Its last word, so the tickets it worked for hear how it ended and
-        // their hand-offs to it are done. An interim report is neither.
-        await this.tickets?.recordChatEvent(parentChatId, chatId, status === "failed" ? "chat_failed" : "chat_finished", { final: true })
-          .catch((error) => this.onError(`could not record sub-chat ${chatId}'s report on its tickets: ${errorMessage(error)}`))
+        // Its last word, so the tickets its turns worked for hear how it
+        // ended and those hand-offs are done. An interim report is neither.
+        if (covered) {
+          await this.tickets?.recordReport(parentChatId, chatId, status === "failed" ? "chat_failed" : "chat_finished", covered)
+            .catch((error) => this.onError(`could not record sub-chat ${chatId}'s report on its tickets: ${errorMessage(error)}`))
+        }
       }
       await this.deliverInTurn(parentChatId, chatId, section)
     } catch (error) {
@@ -1854,17 +1939,24 @@ export class ChatOrchestrator {
    * turn's reply. A turn that was stopped is not reported: whoever stopped
    * it knows, and a steer's new turn carries the same work on.
    */
-  private async reportEndedTurn(chatId: string) {
+  private async reportEndedTurn(chatId: string, endedTurn: number) {
     const chat = this.store.getChat(chatId)
     if (!chat?.reportOwed || !chat.parentChatId || this.reporting.has(chatId)) return
     if (chat.lastTurnOutcome === "cancelled") return
     const through = chat.lastTurnEndedAt ?? 0
     if (chat.reportedThrough === through) return
     const parentChatId = chat.parentChatId
-    const section = this.buildSection(parentChatId, chat)
+    // The ended turn's reply is its whole answer to the hand-offs it took,
+    // so they settle now, though the chat goes on with the next one's.
+    const covered = this.tickets?.coveredBy(parentChatId, chatId, endedTurn)
+    const section = this.buildSection(parentChatId, chat, { tickets: covered?.tickets })
     this.reporting.add(chatId)
     try {
       await this.store.setReportedThrough(chatId, through)
+      if (covered) {
+        await this.tickets?.recordReport(parentChatId, chatId, chat.lastTurnOutcome === "failed" ? "chat_failed" : "chat_finished", covered)
+          .catch((error) => this.onError(`could not record sub-chat ${chatId}'s report on its tickets: ${errorMessage(error)}`))
+      }
       await this.deliverInTurn(parentChatId, chatId, section)
     } catch (error) {
       this.onError(`could not report sub-chat ${chatId} to its parent: ${errorMessage(error)}`)
@@ -2023,9 +2115,9 @@ export class ChatOrchestrator {
   private async startHandoff(actorChatId: string, target: TicketTarget, childChatId: string, options?: { outstanding?: boolean }) {
     const board = this.tickets!
     const ticket = "ticket" in target ? target.ticket : await board.create(actorChatId, target.create)
-    await board.handoff(actorChatId, ticket.id, childChatId, options)
+    const delegationId = await board.handoff(actorChatId, ticket.id, childChatId, options)
     this.push({ sidebar: true, chatIds: [actorChatId] })
-    return ticket
+    return { ticket, delegationId }
   }
 
   /**
@@ -2070,8 +2162,17 @@ export class ChatOrchestrator {
    * that is running, so it is read now, and queued behind one parked on a
    * question, which a steer would throw away.
    */
-  private async tellDelegator(chat: ChatRecord, content: string, source: MessageSource, attachments?: ChatAttachment[]) {
-    const run = { provider: chat.provider ?? undefined, model: chat.lastModel, planMode: chat.planMode, autoPlan: chat.autoPlan }
+  private async tellDelegator(chat: ChatRecord, content: string, source: MessageSource, attachments?: ChatAttachment[], settings: TurnSettings = {}) {
+    // What the delegator last ran with, under what the user's composer chose:
+    // a reply typed in the ticket's composer, which is the delegator's own,
+    // runs as a message typed in the chat would.
+    const run = {
+      provider: settings.provider ?? chat.provider ?? undefined,
+      model: settings.model ?? chat.lastModel,
+      ...(settings.modelOptions ? { modelOptions: settings.modelOptions } : {}),
+      planMode: settings.planMode ?? chat.planMode,
+      autoPlan: settings.autoPlan ?? chat.autoPlan,
+    }
     const parked = this.agent.getActiveStatuses().get(chat.id) === "waiting_for_user"
     if (this.agent.isBusy(chat.id) && !parked) {
       try {
@@ -2120,14 +2221,16 @@ export class ChatOrchestrator {
   // change, after its ack.
 
   /** Stores the reply and sends it to the delegator. See `MessageSource` kind `ticket`. */
-  async replyToTicketAsUser(input: { chatId: string; ticketId: string; text: string; attachments?: ChatAttachment[] }) {
+  async replyToTicketAsUser(input: { chatId: string; ticketId: string; text: string; attachments?: ChatAttachment[] } & TurnSettings) {
     const board = this.requireBoard(input.chatId)
     const chat = this.requireChat(input.chatId)
     const ticket = board.require(chat.id, input.ticketId)
-    const before = board.stateOf(ticket)
     const reply = await board.reply(chat.id, ticket.id, { author: "user", text: input.text, attachments: input.attachments })
-    const content = buildTicketReplyMessage(board.summary(ticket), before, reply)
-    await this.tellDelegator(chat, content, { kind: "ticket", ticketId: ticket.id, number: ticket.number, title: ticket.title, replyId: reply.id }, input.attachments)
+    // Only what the user wrote, as any message they send: the ticket's header
+    // goes on the wire behind it (`ticketReplyNotice`), so the prompt is a
+    // chat message in every respect, slash commands and skills included.
+    const { provider, model, modelOptions, planMode, autoPlan } = input
+    await this.tellDelegator(chat, reply.text, { kind: "ticket", ticketId: ticket.id, number: ticket.number, title: ticket.title, replyId: reply.id }, input.attachments, { provider, model, modelOptions, planMode, autoPlan })
     return { replyId: reply.id }
   }
 

@@ -382,8 +382,23 @@ export type ClientCommand =
    * goes to the delegator as a message with a `ticket` source: steered into
    * a running turn where the harness can, queued where it cannot. A reply on
    * a Done ticket reopens it. `chatId` is the delegator. Result: `{ replyId }`.
+   *
+   * `provider` to `autoPlan` are the delegator's composer settings, sent as
+   * `chat.send` sends them, and the turn the reply starts runs with them.
+   * Absent, it runs with what the delegator last ran with.
    */
-  | { type: "ticket.reply"; chatId: string; ticketId: string; text: string; attachments?: ChatAttachment[] }
+  | {
+      type: "ticket.reply"
+      chatId: string
+      ticketId: string
+      text: string
+      attachments?: ChatAttachment[]
+      provider?: AgentProvider
+      model?: string
+      modelOptions?: ModelOptions
+      planMode?: boolean
+      autoPlan?: boolean
+    }
   /** Close (`done`) or reopen (`open`) a ticket. A reopen is told to the delegator; a close is not. */
   | { type: "ticket.setStatus"; chatId: string; ticketId: string; status: "done" | "open" }
   /** Kept on the server, so it holds across devices. */

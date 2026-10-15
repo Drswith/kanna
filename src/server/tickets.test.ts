@@ -11,8 +11,10 @@ import type { HarnessEvent, HarnessTurn } from "./harness-types"
 import { KannaToolRuntime } from "./kanna-tools"
 import { ChatOrchestrator } from "./orchestrator"
 import { TicketStore } from "./ticket-store"
+import { createWsRouter } from "./ws-router"
 import { timestamped } from "./transcript"
 import { stripSystemMessages } from "../shared/message-preview"
+import { PROVIDERS } from "../shared/types"
 import type { UserPromptEntry } from "../shared/types"
 
 /**
@@ -25,6 +27,8 @@ import type { UserPromptEntry } from "../shared/types"
 interface FakeTurn {
   chatId: string
   content: string
+  model?: string
+  planMode?: boolean
   events: AsyncQueue<HarnessEvent>
   open: boolean
 }
@@ -35,9 +39,11 @@ class FakeCodex {
   stopSession() {}
   stopAll() {}
   getResourceCounts() { return {} }
+  // A prompt that starts with "/name" asks the harness for its skills; this one has none.
+  async listSkills() { return [] }
 
-  async startTurn(args: { chatId: string; content: string }): Promise<HarnessTurn> {
-    const turn: FakeTurn = { chatId: args.chatId, content: args.content, events: new AsyncQueue(), open: true }
+  async startTurn(args: { chatId: string; content: string; model?: string; planMode?: boolean }): Promise<HarnessTurn> {
+    const turn: FakeTurn = { chatId: args.chatId, content: args.content, model: args.model, planMode: args.planMode, events: new AsyncQueue(), open: true }
     this.turns.push(turn)
     const end = () => {
       turn.open = false
@@ -245,7 +251,7 @@ describe("reports to a delegator", () => {
     expect(board.summary(ticket)).toMatchObject({ state: "done", unread: true, statusLine: "Flicker fix finished" })
   })
 
-  test("a chat on two tickets names both, and a failure is recorded as one", async () => {
+  test("a chat given two tickets in a row reports each with the turn that did it, and a failure only on its own", async () => {
     const { startChat, toolsFor, board, codex, prompts } = await setup()
     const delegator = await startChat()
     const call = toolsFor(delegator)
@@ -255,27 +261,113 @@ describe("reports to a delegator", () => {
     expect(board.summary(board.get(delegator, first.ticket.id)!).state).toBe("in_progress")
     expect(board.summary(board.get(delegator, second.ticket.id)!).state).toBe("in_progress")
 
-    // The queued follow-up starts as the first turn ends, so the first turn's
-    // report goes up as an interim one: neither ticket is settled by it.
+    // The queued follow-up starts as the first turn ends. That turn's reply
+    // is its whole answer on Web, so Web settles with it and iOS does not.
     codex.finish(first.chatId, "Web done.")
-    await until(() => codex.turnsFor(first.chatId).length === 2, "the follow-up turn")
-    await until(() => codex.turnsFor(delegator).length === 2, "the interim report's turn")
-    expect(prompts(delegator)[1]!.content).toContain("went straight on into another turn")
-    expect(board.get(delegator, first.ticket.id)!.handoffs[0]!.outstanding).toBe(true)
-    expect(board.get(delegator, first.ticket.id)!.history.map((event) => event.kind)).toEqual(["sent_to"])
+    await until(() => codex.turnsFor(delegator).length === 2, "the first turn's report")
+    const firstReport = prompts(delegator)[1]!
+    expect(firstReport.content).toContain("went straight on into another turn")
+    expect(firstReport.content).toContain(`For ticket #1 "Web" (${first.ticket.id})`)
+    expect(firstReport.content).not.toContain(second.ticket.id)
+    expect(firstReport.source).toEqual({ kind: "report", chatIds: [first.chatId], tickets: { [first.chatId]: [first.ticket.id] } })
+    expect(board.get(delegator, first.ticket.id)!.history.map((event) => event.kind)).toEqual(["sent_to", "chat_finished"])
+    expect(board.summary(board.get(delegator, first.ticket.id)!).state).toBe("done")
+    expect(board.get(delegator, second.ticket.id)!.history.map((event) => event.kind)).toEqual(["sent_to"])
+    expect(board.summary(board.get(delegator, second.ticket.id)!)).toMatchObject({ state: "in_progress", chats: [{ state: "working", outstanding: true }] })
     codex.finish(delegator, "Web is done; iOS is next.")
 
     codex.fail(first.chatId, "Simulator would not boot.")
-    await until(() => prompts(delegator).some((prompt) => prompt.content.includes("Sub-chat failed")), "the failure report")
-    const failure = prompts(delegator).find((prompt) => prompt.content.includes("Sub-chat failed"))!.content
-    expect(failure).toContain(`For tickets #1 "Web" (${first.ticket.id}) and #2 "iOS" (${second.ticket.id})`)
-    expect(prompts(delegator).find((prompt) => prompt.content.includes("Sub-chat failed"))!.source)
-      .toMatchObject({ kind: "report", tickets: { [first.chatId]: [first.ticket.id, second.ticket.id] } })
-    for (const ticketId of [first.ticket.id, second.ticket.id]) {
-      const ticket = board.get(delegator, ticketId)!
-      expect(ticket.history.at(-1)).toMatchObject({ kind: "chat_failed", chatId: first.chatId })
-      expect(ticket.handoffs.every((handoff) => !handoff.outstanding)).toBe(true)
+    await until(() => codex.turnsFor(delegator).length === 3, "the failure report")
+    const failure = prompts(delegator)[2]!
+    expect(failure.content).toContain("Sub-chat failed")
+    expect(failure.content).toContain(`For ticket #2 "iOS" (${second.ticket.id})`)
+    expect(failure.source).toMatchObject({ kind: "report", tickets: { [first.chatId]: [second.ticket.id] } })
+    expect(board.get(delegator, second.ticket.id)!.history.map((event) => event.kind)).toEqual(["sent_to", "chat_failed"])
+    expect(board.get(delegator, first.ticket.id)!.history.map((event) => event.kind)).toEqual(["sent_to", "chat_finished"])
+  })
+
+  test("three hand-offs queued to one chat settle one per turn, and the delegator posting on each is not nudged", async () => {
+    const { startChat, toolsFor, board, codex, prompts } = await setup()
+    const delegator = await startChat()
+    const call = toolsFor(delegator)
+    const a = await call("create_chat", { message: "do A", ticket: { title: "A" } })
+    const b = await call("send_message", { chatId: a.chatId, message: "do B", ticket: { title: "B" } })
+    const c = await call("send_message", { chatId: a.chatId, message: "do C", ticket: { title: "C" } })
+    expect([b.started, c.started]).toEqual([false, false])
+    codex.finish(delegator, "Handed off three.")
+    const child = a.chatId as string
+    const ids = [a.ticket.id, b.ticket.id, c.ticket.id] as string[]
+    const kinds = (ticketId: string) => board.get(delegator, ticketId)!.history.map((event) => event.kind)
+
+    for (const [index, ticketId] of ids.entries()) {
+      codex.finish(child, `Did ${"ABC"[index]}.`)
+      await until(() => codex.turnsFor(delegator).length === index + 2, `the report on ${"ABC"[index]}`)
+      const report = prompts(delegator)[index + 1]!
+      // Each report names, and settles, only the ticket its turn worked on.
+      expect(report.source).toMatchObject({ kind: "report", tickets: { [child]: [ticketId] } })
+      for (const [other, otherId] of ids.entries()) {
+        expect(kinds(otherId)).toEqual(other <= index ? ["sent_to", "chat_finished"] : ["sent_to"])
+        expect(board.summary(board.get(delegator, otherId)!).state).toBe(other <= index ? "done" : "in_progress")
+      }
+      // The delegator posts on the ticket as its report arrives.
+      await call("reply_to_ticket", { ticketId, text: `${"ABC"[index]} is done.` })
+      codex.finish(delegator, "Posted.")
+      await until(() => !codex.turns.some((turn) => turn.chatId === delegator && turn.open), "the delegator at rest")
     }
+
+    // The last report was a final one and added "finished" to C alone.
+    expect(prompts(delegator)[3]!.content).not.toContain("went straight on")
+    for (const ticketId of ids) expect(kinds(ticketId).filter((kind) => kind === "chat_finished")).toHaveLength(1)
+    // Each was posted on after its own report, so there is nothing to nudge about.
+    await Bun.sleep(100)
+    expect(codex.turnsFor(delegator)).toHaveLength(4)
+    expect(prompts(delegator).some((prompt) => prompt.source?.kind === "ticket_nudge")).toBe(false)
+  })
+
+  test("a hand-off steered into a running turn settles with that turn", async () => {
+    const { startChat, toolsFor, board, codex, prompts } = await setup()
+    const delegator = await startChat()
+    const call = toolsFor(delegator)
+    const a = await call("create_chat", { message: "do A", ticket: { title: "A" } })
+    const b = await call("send_message", { chatId: a.chatId, message: "and B, now", ticket: { title: "B" }, delivery: "steer" })
+    expect(b.started).toBe(true)
+    await until(() => codex.turnsFor(a.chatId).length === 2, "the steered turn")
+    codex.finish(delegator, "Handed off.")
+    // The turn A was in was stopped for the steer and is never reported; the
+    // steered turn carries A on, so its report covers both.
+    expect(board.get(delegator, a.ticket.id)!.handoffs[0]!.outstanding).toBe(true)
+
+    codex.finish(a.chatId, "Did A and B.")
+    await until(() => codex.turnsFor(delegator).length === 2, "the report")
+    expect(prompts(delegator)[1]!.source).toMatchObject({ tickets: { [a.chatId]: [a.ticket.id, b.ticket.id] } })
+    for (const ticketId of [a.ticket.id, b.ticket.id]) {
+      expect(board.get(delegator, ticketId)!.history.map((event) => event.kind)).toEqual(["sent_to", "chat_finished"])
+      expect(board.get(delegator, ticketId)!.handoffs.every((handoff) => !handoff.outstanding)).toBe(true)
+    }
+  })
+
+  test("an interim report names the ticket but does not settle it", async () => {
+    const { startChat, toolsFor, board, codex, prompts } = await setup()
+    const delegator = await startChat()
+    const worker = await toolsFor(delegator)("create_chat", { message: "audit it", ticket: { title: "Audit" } })
+    codex.finish(delegator, "Handed off.")
+    // The worker hands part of it to a sub-chat of its own, then ends its turn.
+    const helper = await toolsFor(worker.chatId)("create_chat", { message: "check the parser" })
+    codex.finish(worker.chatId, "Waiting on the parser check.")
+    await until(() => codex.turnsFor(delegator).length === 2, "the interim report")
+    const interim = prompts(delegator)[1]!.content
+    expect(interim).toContain("Not its last word")
+    expect(interim).toContain(`For ticket #1 "Audit" (${worker.ticket.id})`)
+    expect(board.get(delegator, worker.ticket.id)!.handoffs[0]!.outstanding).toBe(true)
+    expect(board.get(delegator, worker.ticket.id)!.history.map((event) => event.kind)).toEqual(["sent_to"])
+    codex.finish(delegator, "Noted.")
+
+    // The helper's report wakes the worker; the turn that ends it is its last word.
+    codex.finish(helper.chatId, "Parser is fine.")
+    await until(() => codex.turnsFor(worker.chatId).length === 2, "the worker's next turn")
+    codex.finish(worker.chatId, "Audit done.")
+    await until(() => board.get(delegator, worker.ticket.id)!.handoffs[0]!.outstanding === false, "the final report")
+    expect(board.get(delegator, worker.ticket.id)!.history.map((event) => event.kind)).toEqual(["sent_to", "chat_finished"])
   })
 
   test("a chat stopping to ask the user is recorded on its tickets", async () => {
@@ -374,12 +466,152 @@ describe("the user's ticket replies", () => {
     await until(() => codex.turnsFor(delegator).length === 2, "the reply's turn")
     const prompt = prompts(delegator)[1]!
     expect(prompt.source).toEqual({ kind: "ticket", ticketId, number: 1, title: "Escape hold", replyId })
-    expect(stripSystemMessages(prompt.content)).toBe("and on iOS too")
-    expect(prompt.content).toContain(`The user replied on ticket #1 "Escape hold" (${ticketId})`)
-    expect(prompt.content).toContain("It is In progress.")
-    expect(prompt.content).toContain(`"Flicker fix" (chat id ${child.chatId}) working`)
-    expect(prompt.content).toContain("reply_to_ticket")
-    expect(prompt.content).toContain(`Pass ticketId "${ticketId}"`)
+    // Stored as the user's words alone, as any message they send.
+    expect(prompt.content).toBe("and on iOS too")
+    // The header is the turn's, on the wire, after those words.
+    const wire = codex.turnsFor(delegator)[1]!.content
+    expect(wire.startsWith("and on iOS too")).toBe(true)
+    expect(wire).toContain(`The user replied on ticket #1 "Escape hold" (${ticketId})`)
+    expect(wire).toContain("It is In progress.")
+    expect(wire).toContain(`"Flicker fix" (chat id ${child.chatId}) working`)
+    expect(wire).toContain("reply_to_ticket")
+    expect(wire).toContain(`Pass ticketId "${ticketId}"`)
+  })
+
+  test("answering the delegator's question tells it the ticket is In progress, not still waiting", async () => {
+    const { startChat, toolsFor, orchestrator, codex, board } = await setup()
+    const delegator = await startChat()
+    const { ticketId } = await toolsFor(delegator)("create_ticket", { title: "Escape hold" })
+    await toolsFor(delegator)("reply_to_ticket", { ticketId, text: "Once per install, or per session?", asksUser: true })
+    expect(board.stateOf(board.require(delegator, ticketId))).toBe("waiting_on_you")
+    codex.finish(delegator, "Asked.")
+    await until(() => !orchestrator["agent"].isBusy(delegator), "the delegator at rest")
+
+    await orchestrator.replyToTicketAsUser({ chatId: delegator, ticketId, text: "once per install" })
+    await until(() => codex.turnsFor(delegator).length === 2, "the reply's turn")
+    const content = codex.turnsFor(delegator)[1]!.content
+    expect(content).toContain("It is In progress.")
+    expect(content).not.toContain("Waiting on the user")
+    expect(board.require(delegator, ticketId).asksUser).toBe(false)
+  })
+
+  test("through ticket.reply, an answer to the delegator's question on a finished ticket reads In progress at the turn's start", async () => {
+    // Ticket #8: its one chat finished, then the delegator asked the user
+    // something (asksUser), and the user answered on the ticket. The server
+    // that produced "It is Waiting on the user" was a build from before the
+    // header described the state after the reply; this is that sequence.
+    const { startChat, toolsFor, orchestrator, codex, board, store, agent, prompts } = await setup()
+    const delegator = await startChat()
+    const call = toolsFor(delegator)
+    const child = await call("create_chat", { message: "build it", title: "Live rows", ticket: { title: "One live row per hand-off" } })
+    const ticketId = child.ticket.id as string
+    codex.finish(delegator, "Handed off.")
+    codex.finish(child.chatId, "Built, uncommitted.")
+    await until(() => codex.turnsFor(delegator).length === 2, "the report")
+    await call("reply_to_ticket", { ticketId, text: "Built. Keep the chat list below the body?", asksUser: true })
+    codex.finish(delegator, "Posted.")
+    await until(() => !agent.isBusy(delegator), "the delegator at rest")
+    expect(board.summary(board.require(delegator, ticketId))).toMatchObject({ state: "waiting_on_you", statusLine: "Asks you" })
+
+    const router = createWsRouter({
+      store,
+      diffStore: { getProjectSnapshot: () => null, getSnapshotVersion: () => 0 } as never,
+      worktreeProbe: { getStates: () => new Map(), getRepoLabels: () => new Map(), getProjectsWithoutRepo: () => new Set() },
+      agent,
+      terminals: { getSnapshot: () => null, onEvent: () => () => {} } as never,
+      keybindings: { getSnapshot: () => ({ bindings: {}, warning: null }), onChange: () => () => {} } as never,
+      appSettings: { getSnapshot: () => ({ transcript: { windowAssistantMessages: 50 } }), write: async () => ({}), writePatch: async () => ({}), onChange: () => () => {} } as never,
+      llmProvider: { read: async () => ({}), write: async () => ({}), validate: async () => ({ ok: true, error: null }) } as never,
+      refreshDiscovery: async () => [],
+      getDiscoveredProjects: () => [],
+      machineDisplayName: "Local Machine",
+      updateManager: null,
+      tickets: orchestrator,
+    })
+    const ws = { sent: [] as Array<Record<string, any>>, data: { subscriptions: new Map(), protectedDraftChatIds: new Set<string>() }, send(message: string) { this.sent.push(JSON.parse(message)) } }
+    router.handleOpen(ws as never)
+    await router.handleMessage(ws as never, JSON.stringify({
+      v: 1, type: "command", id: "reply", command: { type: "ticket.reply", chatId: delegator, ticketId, text: "whats the question?" },
+    }))
+    expect(ws.sent.find((envelope) => envelope.id === "reply")).toMatchObject({ type: "ack", result: { replyId: expect.stringMatching(/^rp_/) } })
+
+    // The reply cleared the question in the same write that stored it.
+    const ticket = board.require(delegator, ticketId)
+    expect(ticket).toMatchObject({ asksUser: false, awaitingDelegator: true })
+    expect(board.summary(ticket)).toMatchObject({ state: "in_progress", statusLine: "Waiting on the delegator" })
+
+    // The turn the reply starts carries the notice, written as the ticket stands after it.
+    await until(() => codex.turnsFor(delegator).length === 3, "the reply's turn")
+    const wire = codex.turnsFor(delegator)[2]!.content
+    expect(wire).toContain(`The user replied on ticket #1 "One live row per hand-off" (${ticketId})`)
+    expect(wire).toContain("It is In progress.")
+    expect(wire).not.toContain("Waiting on the user")
+    expect(wire).toContain(`"Live rows" (chat id ${child.chatId}) finished`)
+    expect(prompts(delegator)[2]!.content).toBe("whats the question?")
+  })
+
+  test("keep their attachments, on the ticket and on the delegator's prompt", async () => {
+    const { startChat, toolsFor, orchestrator, codex, prompts } = await setup()
+    const delegator = await startChat()
+    const { ticketId } = await toolsFor(delegator)("create_ticket", { title: "Escape hold" })
+    codex.finish(delegator, "Made it.")
+    await until(() => !orchestrator["agent"].isBusy(delegator), "the delegator at rest")
+
+    // The shape the composer's upload returns (`persistProjectUpload`).
+    const attachment = {
+      id: "up_1",
+      kind: "image" as const,
+      displayName: "shot.png",
+      absolutePath: "/tmp/project/.kanna/uploads/shot.png",
+      relativePath: "./.kanna/uploads/shot.png",
+      contentUrl: "/api/projects/p1/uploads/shot.png/content",
+      mimeType: "image/png",
+      size: 12,
+    }
+    const { replyId } = await orchestrator.replyToTicketAsUser({ chatId: delegator, ticketId, text: "", attachments: [attachment] })
+    const reply = orchestrator.ticketDetail(delegator, ticketId)?.replies.find((candidate) => candidate.id === replyId)
+    expect(reply?.attachments).toEqual([attachment])
+    await until(() => codex.turnsFor(delegator).length === 2, "the reply's turn")
+    expect(prompts(delegator)[1]!.attachments).toEqual([attachment])
+  })
+
+  test("that start with a slash command reach the harness starting with it, as a chat message does", async () => {
+    const { startChat, toolsFor, orchestrator, codex, prompts } = await setup()
+    const delegator = await startChat()
+    const { ticketId } = await toolsFor(delegator)("create_ticket", { title: "Escape hold" })
+    codex.finish(delegator, "Made it.")
+    await until(() => !orchestrator["agent"].isBusy(delegator), "the delegator at rest")
+
+    await orchestrator.replyToTicketAsUser({ chatId: delegator, ticketId, text: "/emil-design-eng tighten the hold animation" })
+    await until(() => codex.turnsFor(delegator).length === 2, "the reply's turn")
+    expect(prompts(delegator)[1]!.content).toBe("/emil-design-eng tighten the hold animation")
+    const wire = codex.turnsFor(delegator)[1]!.content
+    expect(wire.startsWith("/emil-design-eng tighten the hold animation")).toBe(true)
+    expect(wire).toContain("The user replied on ticket #1")
+  })
+
+  test("that start with a slash command keep it first when steered into a busy delegator", async () => {
+    const { startChat, toolsFor, orchestrator, codex } = await setup()
+    const delegator = await startChat()
+    const { ticketId } = await toolsFor(delegator)("create_ticket", { title: "Escape hold" })
+
+    await orchestrator.replyToTicketAsUser({ chatId: delegator, ticketId, text: "/emil-design-eng and the ring" })
+    await until(() => codex.turnsFor(delegator).length === 2, "the steered turn")
+    expect(codex.turnsFor(delegator)[1]!.content.startsWith("/emil-design-eng and the ring")).toBe(true)
+  })
+
+  test("run the delegator's turn with the settings the ticket's composer chose", async () => {
+    const { startChat, toolsFor, orchestrator, codex } = await setup()
+    const delegator = await startChat()
+    const { ticketId } = await toolsFor(delegator)("create_ticket", { title: "Escape hold" })
+    codex.finish(delegator, "Made it.")
+    await until(() => !orchestrator["agent"].isBusy(delegator), "the delegator at rest")
+    const before = codex.turnsFor(delegator)[0]!.model
+    const chosen = PROVIDERS.find((provider) => provider.id === "codex")!.models.find((model) => model.id !== before)!.id
+
+    await orchestrator.replyToTicketAsUser({ chatId: delegator, ticketId, text: "try it", provider: "codex", model: chosen, planMode: true })
+    await until(() => codex.turnsFor(delegator).length === 2, "the reply's turn")
+    expect(codex.turnsFor(delegator)[1]).toMatchObject({ model: chosen, planMode: true })
   })
 
   test("steer into a delegator that is busy", async () => {
@@ -393,7 +625,7 @@ describe("the user's ticket replies", () => {
   })
 
   test("reopen a Done ticket, and mark it read", async () => {
-    const { startChat, toolsFor, orchestrator, codex, prompts, board } = await setup()
+    const { startChat, toolsFor, orchestrator, codex, board } = await setup()
     const delegator = await startChat()
     const child = await toolsFor(delegator)("create_chat", { message: "fix it", ticket: { title: "Escape hold" } })
     const ticketId = child.ticket.id as string
@@ -412,7 +644,7 @@ describe("the user's ticket replies", () => {
     expect(board.summary(ticket)).toMatchObject({ state: "in_progress", unread: false })
     expect(ticket.readAt).toBeDefined()
     await until(() => codex.turnsFor(delegator).length === 4, "the reply's turn")
-    expect(prompts(delegator)[3]!.content).toContain("It was Done, and this reply reopened it.")
+    expect(codex.turnsFor(delegator)[3]!.content).toContain("It was Done, and this reply reopened it.")
   })
 })
 

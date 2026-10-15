@@ -89,6 +89,16 @@ export interface TicketHandoff {
   childChatId: string
   createdAt: number
   outstanding: boolean
+  /**
+   * The chat's turn its message went into (`turnCount` once that turn had
+   * started). A report settles exactly the hand-offs of the turns it covers,
+   * so one chat given several tickets in a row settles them one by one. Null
+   * while the message waits in the chat's queue; absent on hand-offs from
+   * before turns were recorded, which the chat's next final report settles.
+   */
+  turn?: number | null
+  /** While `turn` is null: the queued message that carries it. */
+  queuedMessageId?: string
 }
 
 /** The last explicit close or reopen. Absent when nobody has done either. */

@@ -1,5 +1,6 @@
 import {
   deriveTicketState,
+  type TicketHandoff,
   describeTicket,
   summarizeTicket,
   ticketAttentionCount,
@@ -27,7 +28,7 @@ import type { TicketStore, TicketStoreEventInput } from "./ticket-store"
  * messages; what gets sent to the delegator is the orchestrator's to decide.
  *
  * It also keeps the nudge's ledger: tickets that got news the delegator has
- * to answer (a user reply, a final report), and tickets it then wrote on or
+ * to answer (a user reply, a report on their turn), and tickets it then wrote on or
  * handed work from. In memory only. A restart loses at most one nudge.
  */
 
@@ -110,11 +111,41 @@ export class TicketBoard {
     return this.list(delegatorChatId).length > 0
   }
 
-  /** The tickets this chat still owes a final report on. */
-  ticketsAwaiting(delegatorChatId: string, childChatId: string): TicketRecord[] {
-    return this.list(delegatorChatId)
-      .filter((ticket) => ticket.handoffs.some((handoff) => handoff.childChatId === childChatId && handoff.outstanding))
-      .sort((a, b) => a.number - b.number)
+  /** The chat's outstanding hand-offs on this board, with their tickets. */
+  private outstandingFor(delegatorChatId: string, childChatId: string): Array<{ handoff: TicketHandoff; ticket: TicketRecord }> {
+    const found: Array<{ handoff: TicketHandoff; ticket: TicketRecord }> = []
+    for (const ticket of this.list(delegatorChatId)) {
+      for (const handoff of ticket.handoffs) {
+        if (handoff.childChatId === childChatId && handoff.outstanding) found.push({ handoff, ticket })
+      }
+    }
+    return found
+  }
+
+  /**
+   * The outstanding hand-offs a report on the chat's turns up to `throughTurn`
+   * covers: those whose message went into one of those turns. A turn that was
+   * stopped for a steer is never reported, so its hand-offs fall to the next
+   * turn's report, which carries the same work on.
+   *
+   * `final` is the chat's last word for now. It also covers hand-offs from
+   * before turns were recorded, and any whose send never said where its
+   * message went (a restart mid-send), except those still being sent.
+   */
+  coveredBy(delegatorChatId: string, childChatId: string, throughTurn: number, options?: { final?: boolean; sending?: ReadonlySet<string> }) {
+    const covered = this.outstandingFor(delegatorChatId, childChatId).filter(({ handoff }) => {
+      if (typeof handoff.turn === "number") return handoff.turn <= throughTurn
+      if (!options?.final) return false
+      if (handoff.turn === undefined) return true
+      return !handoff.queuedMessageId && !options.sending?.has(handoff.delegationId)
+    })
+    const tickets = [...new Map(covered.map(({ ticket }) => [ticket.id, ticket])).values()].sort((a, b) => a.number - b.number)
+    return { handoffs: covered.map(({ handoff }) => handoff), tickets }
+  }
+
+  /** Hand-offs still waiting in the chat's queue, to place in the turn that takes them. */
+  queuedFor(delegatorChatId: string, childChatId: string): TicketHandoff[] {
+    return this.outstandingFor(delegatorChatId, childChatId).map(({ handoff }) => handoff).filter((handoff) => handoff.turn === null)
   }
 
   /** Of these chats, the ones no hand-off links to any ticket. */
@@ -258,51 +289,81 @@ export class TicketBoard {
   async handoff(delegatorChatId: string, ticketId: string, childChatId: string, options?: { outstanding?: boolean }) {
     const ticket = this.require(delegatorChatId, ticketId)
     const at = this.now()
+    const delegationId = shortId("dl")
+    const outstanding = options?.outstanding ?? true
     await this.store.append(delegatorChatId, [
       ...this.reopenEvents(ticket, at, { kind: "reopened", cause: "chat_started", chatId: childChatId }),
       {
         type: "handoff_added",
         at,
-        handoff: { delegationId: shortId("dl"), ticketId: ticket.id, childChatId, createdAt: at, outstanding: options?.outstanding ?? true },
+        // Placed in a turn once its message is delivered (`delivered`).
+        handoff: { delegationId, ticketId: ticket.id, childChatId, createdAt: at, outstanding, ...(outstanding ? { turn: null } : {}) },
       },
       this.history(ticket.id, at, { kind: "sent_to", chatId: childChatId }),
       ...(ticket.awaitingDelegator ? [{ type: "flags_set", at, ticketId: ticket.id, awaitingDelegator: false } as const] : []),
     ])
     this.noteAddressed(delegatorChatId, ticket.id, at)
+    return delegationId
+  }
+
+  /** Where a hand-off's message went: a turn of the chat, or its queue to wait for one. */
+  async delivered(delegatorChatId: string, handoffs: readonly TicketHandoff[], where: { turn: number } | { queuedMessageId: string }) {
+    const at = this.now()
+    await this.store.append(delegatorChatId, handoffs.map((handoff) => ({
+      type: "handoff_delivered" as const,
+      at,
+      ticketId: handoff.ticketId,
+      delegationId: handoff.delegationId,
+      ...where,
+    })))
+  }
+
+  findHandoff(delegatorChatId: string, delegationId: string): TicketHandoff | undefined {
+    for (const ticket of this.list(delegatorChatId)) {
+      const handoff = ticket.handoffs.find((candidate) => candidate.delegationId === delegationId)
+      if (handoff) return handoff
+    }
+    return undefined
   }
 
   /**
-   * A chat reported to the delegator, or stopped to ask the user something.
-   * Each ticket it still owes gets the line. A final report settles its
-   * hand-offs and is news the delegator has to pass on.
+   * A report on the turns that handled these hand-offs: each of their
+   * tickets gets the line, the hand-offs are settled, and the report is news
+   * the delegator has to pass on. Only these: a chat that worked for other
+   * tickets in other turns reported on those with those turns.
    */
-  async recordChatEvent(
+  async recordReport(
     delegatorChatId: string,
     childChatId: string,
-    kind: "chat_finished" | "chat_failed" | "chat_asking",
-    options?: { final?: boolean },
-  ): Promise<TicketRecord[]> {
-    const tickets = this.ticketsAwaiting(delegatorChatId, childChatId)
-    if (tickets.length === 0) return tickets
+    kind: "chat_finished" | "chat_failed",
+    covered: { handoffs: readonly TicketHandoff[]; tickets: readonly TicketRecord[] },
+  ) {
+    if (covered.handoffs.length === 0) return
     const at = this.now()
-    const events = tickets.map((ticket) => this.history(ticket.id, at, { kind, chatId: childChatId }))
-    if (options?.final) {
-      events.push({ type: "handoffs_settled", at, childChatId })
-      for (const ticket of tickets) this.noteNews(delegatorChatId, ticket.id, { kind: "report", chatId: childChatId }, at)
-    }
-    await this.store.append(delegatorChatId, events)
-    return tickets
+    await this.store.append(delegatorChatId, [
+      ...covered.tickets.map((ticket) => this.history(ticket.id, at, { kind, chatId: childChatId })),
+      { type: "handoffs_settled", at, childChatId, delegationIds: covered.handoffs.map((handoff) => handoff.delegationId) },
+    ])
+    for (const ticket of covered.tickets) this.noteNews(delegatorChatId, ticket.id, { kind: "report", chatId: childChatId }, at)
+  }
+
+  /** The chat stopped to ask the user something, on these tickets' work. Settles nothing. */
+  async recordAsking(delegatorChatId: string, childChatId: string, tickets: readonly TicketRecord[]) {
+    if (tickets.length === 0) return
+    const at = this.now()
+    await this.store.append(delegatorChatId, tickets.map((ticket) => this.history(ticket.id, at, { kind: "chat_asking", chatId: childChatId })))
   }
 
   /**
    * The chat owes no report any more without having made one: stopped by its
-   * parent, adopted away, or its hand-off never started. All its hand-offs,
-   * or those on `ticketIds`.
+   * parent, adopted away, or a hand-off's message never sent. All its
+   * hand-offs, or exactly `delegationIds`.
    */
-  async settle(delegatorChatId: string, childChatId: string, ticketIds?: string[]) {
-    const owed = this.ticketsAwaiting(delegatorChatId, childChatId).filter((ticket) => !ticketIds || ticketIds.includes(ticket.id))
+  async settle(delegatorChatId: string, childChatId: string, delegationIds?: string[]) {
+    const owed = this.outstandingFor(delegatorChatId, childChatId)
+      .filter(({ handoff }) => !delegationIds || delegationIds.includes(handoff.delegationId))
     if (owed.length === 0) return
-    await this.store.append(delegatorChatId, [{ type: "handoffs_settled", at: this.now(), childChatId, ...(ticketIds ? { ticketIds } : {}) }])
+    await this.store.append(delegatorChatId, [{ type: "handoffs_settled", at: this.now(), childChatId, ...(delegationIds ? { delegationIds } : {}) }])
   }
 
   async markRead(delegatorChatId: string, ticketId: string) {
