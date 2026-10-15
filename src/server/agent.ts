@@ -2113,7 +2113,12 @@ export class AgentCoordinator {
     // Orchestration: who sent this prompt when it was not the user, and which
     // sub-chats of this one are still running. The second matters most after a
     // steer, which ends the turn that was tracking them.
-    for (const notice of this.orchestration?.buildTurnNotices(args.chatId, args.source) ?? []) {
+    const turnNotices = this.orchestration?.buildTurnNotices(args.chatId, args.source, {
+      provider: args.provider,
+      planMode: args.planMode,
+      autoPlan: args.autoPlan,
+    }) ?? []
+    for (const notice of turnNotices) {
       wireContent = appendSystemMessageBlock(wireContent, notice)
     }
 
@@ -2221,6 +2226,9 @@ export class AgentCoordinator {
         serviceTier: args.serviceTier,
         planMode: args.planMode,
         delegator,
+        // Kanna, not the model, asks for a Codex plan to be approved, so the
+        // notice above cannot stop that one. See `agent-to-agent.ts`.
+        skipPlanApproval: this.orchestration?.isAgentToAgent(args.chatId, args.source) ?? false,
         onToolRequest,
       })
     }
@@ -3259,6 +3267,7 @@ export class AgentCoordinator {
       active.pendingTool = pending
       active.status = "waiting_for_user"
       this.emitStateChange(chatId)
+      this.orchestration?.handleWaitingForUser(chatId)
     })
   }
 
