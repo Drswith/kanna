@@ -1,11 +1,12 @@
-import type {
-  TicketChatLink,
-  TicketChatState,
-  TicketDetail,
-  TicketHistoryEvent,
-  TicketRecord,
-  TicketState,
-  TicketSummary,
+import {
+  ticketLinkPath,
+  type TicketChatLink,
+  type TicketChatState,
+  type TicketDetail,
+  type TicketHistoryEvent,
+  type TicketRecord,
+  type TicketState,
+  type TicketSummary,
 } from "../shared/tickets"
 import type { TicketNewsReason } from "./ticket-board"
 
@@ -139,6 +140,8 @@ export function agentTicketSummary(ticket: TicketSummary) {
     ticketId: ticket.id,
     number: ticket.number,
     title: ticket.title,
+    // For the agent to link the ticket with, as `[#N Title](link)`: copied, not built.
+    link: ticketLinkPath(ticket.delegatorChatId, ticket.id),
     state: ticket.state,
     status: ticket.statusLine,
     chats: ticket.chats.map(agentChat),

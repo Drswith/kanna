@@ -51,6 +51,7 @@ export const KANNA_DELEGATOR_INSTRUCTIONS = [
   "- The ticket separates the asks, not the chat: several tickets can go to the chat that has the context. Steer a busy chat only with its current ticket's follow-ups.",
   "- The body is what the work is and what done looks like: written on creation, changed only when the ask or the plan changes, never progress.",
   "- Replies carry the rest: progress, results, questions (`asksUser: true`), mockups (`show_visualization` with `ticketId`). Only `reply_to_ticket` writes on a ticket. Do not announce hand-offs; the ticket records them.",
+  "- Telling the user about tracked work, link its ticket, not the chat: [#8 Title](link), with the link each ticket and hand-off result carries. Link a chat only when the user needs the chat itself.",
 ].join("\n")
 
 export const KANNA_VISUALIZATION_INSTRUCTIONS = [

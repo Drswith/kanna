@@ -35,7 +35,13 @@ function sameItem(left: ViewerItem, right: ViewerItem) {
   return left.kind === "delegated" && right.kind === "delegated" && left.chatId === right.chatId
 }
 
-export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): ViewerLevelBelow {
+/**
+ * `pageChatId` is the chat the page is on. A ticket has its board under it
+ * only on its delegator's own page, where the board is the page's: anywhere
+ * else it was opened from a link, and goes back as anything else opened
+ * there does.
+ */
+export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null, pageChatId: string | null = null): ViewerLevelBelow {
   const { item } = level
   // Something opened over a chat, the board or a ticket goes back to it, at
   // the width it had.
@@ -57,16 +63,19 @@ export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): 
     if (item.delegated && item.ticket) return { item: { kind: "ticket", chatId: item.delegated, ticketId: item.ticket }, ...kept }
     if (item.delegated) return { item: { kind: "delegated", chatId: item.delegated }, ...kept }
   }
-  // A ticket is opened over its board, from the board or from anywhere else
-  // (a card in the transcript, a link), and goes back to it. On a phone too,
-  // where the board is no floor and Back from it shuts the overlay.
-  if (item.kind === "ticket") return { item: { kind: "delegated", chatId: item.chatId }, ...kept }
+  // On its delegator's page a ticket goes back to its board, whatever opened
+  // it (the board, a card in the transcript, a link). On a phone too, where
+  // the board is no floor and Back from it shuts the overlay.
+  if (item.kind === "ticket") {
+    const boardIsFloor = floor?.kind === "delegated" && floor.chatId === item.chatId
+    if (boardIsFloor || pageChatId === item.chatId) return { item: { kind: "delegated", chatId: item.chatId }, ...kept }
+  }
 
   if (!floor || sameItem(item, floor)) return "closed"
   return { item: floor, ...kept }
 }
 
 /** Whether Back has somewhere to go: a level under this one that is not the pane shut. */
-export function hasViewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): boolean {
-  return viewerLevelBelow(level, floor) !== "closed"
+export function hasViewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null, pageChatId: string | null = null): boolean {
+  return viewerLevelBelow(level, floor, pageChatId) !== "closed"
 }

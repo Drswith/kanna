@@ -14,6 +14,7 @@ import { useStableSidebarThreads } from "../useStableSidebarThreads"
 import { useSidebarStore } from "../../stores/sidebarStore"
 import { useTicketBoard, useTicketSummary } from "../../stores/ticketBoardStore"
 import { useViewerStore, type ViewerItem } from "../../stores/viewerStore"
+import { viewerLevelBelow } from "../../lib/viewer-levels"
 import type { ViewerNavigation } from "../../components/viewer/ViewerSurface"
 import { useOpenChat } from "../useOpenChat"
 import type { ChatPreviewContext } from "./ChatPreview"
@@ -73,6 +74,13 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
   }, [blocks])
 
   const stepBack = useViewerStore((store) => store.stepBack)
+  // Its board is under it on its delegator's page. Opened from a link in
+  // another chat it has none there, so it offers no way back to one: its
+  // Close, and the pane's own Back where the page has a board of its own.
+  const floor = useViewerStore((store) => store.floor)
+  const pageChatKey = useViewerStore((store) => store.chatKey)
+  const below = viewerLevelBelow({ item }, floor, pageChatKey || null)
+  const boardBelow = below !== "closed" && below.item.kind === "delegated" && below.item.chatId === chatId
 
   // The ↑ and ↓ in the header, and k and j, through the board in its order.
   // Each step puts the next ticket where this one is, as a new card (the view
@@ -152,10 +160,12 @@ export const TicketView = memo(function TicketView({ item, context, onClose }: {
     <ViewerSurface
       label={head ? `Ticket ${number}, ${head.title}` : "Ticket"}
       navigation={navigation}
-      leading={<ViewerIconButton label="Back to tickets (Esc)" onClick={stepBack}><ChevronLeft /></ViewerIconButton>}
+      leading={boardBelow ? <ViewerIconButton label="Back to tickets (Esc)" onClick={stepBack}><ChevronLeft /></ViewerIconButton> : undefined}
       title={(
         <span className="flex min-w-0 items-center gap-1.5">
-          <button type="button" onClick={stepBack} className="shrink-0 font-normal text-muted-foreground outline-none focus-visible:underline pointer-hover:text-foreground">Tickets</button>
+          {boardBelow
+            ? <button type="button" onClick={stepBack} className="shrink-0 font-normal text-muted-foreground outline-none focus-visible:underline pointer-hover:text-foreground">Tickets</button>
+            : <span className="shrink-0 font-normal text-muted-foreground">Tickets</span>}
           <span aria-hidden className="text-muted-foreground">/</span>
           <span className="font-semibold tabular-nums">{number}</span>
         </span>

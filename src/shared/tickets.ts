@@ -356,3 +356,19 @@ export function ticketActivity(ticket: Pick<TicketDetail, "replies" | "history">
 export function compareTicketsByActivity(a: Pick<TicketSummary, "updatedAt" | "number">, b: Pick<TicketSummary, "updatedAt" | "number">) {
   return b.updatedAt - a.updatedAt || b.number - a.number
 }
+
+// ── Links ─────────────────────────────────────────────────────────────────
+
+/** The query parameter that opens a ticket over its delegator's chat. */
+export const TICKET_LINK_PARAM = "ticket"
+
+/**
+ * A ticket's address, and the one form of a link to it: its delegator's
+ * chat with the ticket open in the pane, `/chat/<delegatorChatId>?ticket=<ticketId>`.
+ * It names the delegator, so any page opens it with nothing to look up, and
+ * as a page's address it opens the delegator with the ticket over it. The
+ * tools hand it to agents ready-made (`link`), so its length costs nothing.
+ */
+export function ticketLinkPath(delegatorChatId: string, ticketId: string): string {
+  return `/chat/${encodeURIComponent(delegatorChatId)}?${TICKET_LINK_PARAM}=${encodeURIComponent(ticketId)}`
+}

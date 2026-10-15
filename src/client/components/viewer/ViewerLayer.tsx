@@ -76,7 +76,8 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
   const viewer = presented ? presented.viewer : live
   const stepBack = useViewerStore((store) => store.stepBack)
   const shut = useViewerStore((store) => store.shut)
-  const below = floor && viewer ? viewerLevelBelow(viewer, floor) : null
+  const pageChatKey = useViewerStore((store) => store.chatKey)
+  const below = floor && viewer ? viewerLevelBelow(viewer, floor, pageChatKey || null) : null
   const hasBack = below !== null && below !== "closed"
   const backKind = hasBack ? below.item.kind : null
   const floorState = useMemo<ViewerFloorState | null>(() => (floor ? {

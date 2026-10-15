@@ -275,7 +275,7 @@ export const useViewerStore = create<ViewerState>()((set, get) => ({
     const { chatKey, floor } = get()
     const current = currentViewer(chatKey)
     if (!current) return
-    const below = viewerLevelBelow(current, floor)
+    const below = viewerLevelBelow(current, floor, chatKey || null)
     if (below === "closed") {
       set({ changedByKey: isKeyboardInitiated() })
       useRightSidebarStore.getState().setChatViewer(chatKey, null)

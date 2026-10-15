@@ -182,7 +182,7 @@ describe("hand-offs from a delegator", () => {
     const call = toolsFor(delegator)
 
     const child = await call("create_chat", { message: "fix the flicker", title: "Flicker fix", ticket: { title: "Flicker", body: "No flicker on open." } })
-    expect(child.ticket).toEqual({ id: expect.stringMatching(/^tk_[0-9a-f]{6}$/), number: 1 })
+    expect(child.ticket).toEqual({ id: expect.stringMatching(/^tk_[0-9a-f]{6}$/), number: 1, link: `/chat/${delegator}?ticket=${child.ticket.id}` })
     const ticket = board.get(delegator, child.ticket.id)!
     expect(ticket).toMatchObject({ title: "Flicker", body: "No flicker on open.", number: 1 })
     expect(ticket.handoffs).toMatchObject([{ childChatId: child.chatId, outstanding: true }])
@@ -204,9 +204,10 @@ describe("hand-offs from a delegator", () => {
     await until(() => !orchestrator["agent"].isBusy(first.chatId), "the first chat at rest")
     const fork = await call("fork_chat", { chatId: first.chatId, ticketId })
     expect(fork.error).toBeUndefined()
-    expect(fork.ticket).toEqual({ id: ticketId, number: 1 })
+    const link = `/chat/${delegator}?ticket=${ticketId}`
+    expect(fork.ticket).toEqual({ id: ticketId, number: 1, link })
     const sent = await call("send_message", { chatId: first.chatId, message: "now publish", ticketId })
-    expect(sent.ticket).toEqual({ id: ticketId, number: 1 })
+    expect(sent.ticket).toEqual({ id: ticketId, number: 1, link })
     expect(board.get(delegator, ticketId)!.handoffs.map((handoff) => [handoff.childChatId, handoff.outstanding]))
       // The first was settled by the report of the turn it asked for.
       .toEqual([[first.chatId, false], [fork.chatId, false], [first.chatId, true]])
@@ -723,6 +724,24 @@ describe("the board on the snapshot", () => {
     expect(await call("list_tickets", { status: "open" })).toMatchObject({ total: 1, tickets: [{ number: 1, status: "Flicker fix is working" }] })
     expect(await call("update_ticket", { ticketId: child.ticket.id, title: "Escape hold: 500ms" })).toMatchObject({ title: "Escape hold: 500ms" })
     expect((await call("read_ticket", { ticketId: child.ticket.id })).history.at(-1)).toMatchObject({ kind: "renamed", from: "Escape hold" })
+  })
+
+  test("every ticket a tool names carries its link, for the agent to copy", async () => {
+    const { startChat, toolsFor } = await setup()
+    const delegator = await startChat()
+    const call = toolsFor(delegator)
+    const link = (ticketId: string) => `/chat/${delegator}?ticket=${ticketId}`
+
+    const created = await call("create_ticket", { title: "Escape hold" })
+    expect(created.link).toBe(link(created.ticketId))
+    const child = await call("create_chat", { message: "fix it", title: "Flicker fix", ticket: { title: "Ring" } })
+    expect(child.ticket).toMatchObject({ number: 2, link: link(child.ticket.id) })
+    const sent = await call("send_message", { chatId: child.chatId, message: "and the hint", ticketId: created.ticketId })
+    expect(sent.ticket.link).toBe(link(created.ticketId))
+    // fork_chat's, which needs a chat at rest to copy, is checked with the follow-ups above.
+    expect((await call("read_ticket", { ticketId: created.ticketId })).link).toBe(link(created.ticketId))
+    const listed = await call("list_tickets", {})
+    expect(listed.tickets.map((ticket: { ticketId: string; link: string }) => ticket.link)).toEqual(listed.tickets.map((ticket: { ticketId: string }) => link(ticket.ticketId)))
   })
 
   test("show_visualization with a ticketId posts the same media file on the ticket", async () => {

@@ -70,9 +70,18 @@ describe("hasViewerLevelBelow", () => {
 describe("viewerLevelBelow for tickets", () => {
   const TICKET = { kind: "ticket", chatId: "deleg", ticketId: "tk_00000d" } as const
 
-  test("a ticket goes back to its board, with or without the board as the floor", () => {
-    expect(viewerLevelBelow({ item: TICKET, widthPx: 440 }, LIST)).toEqual({ item: LIST, widthPx: 440 })
-    expect(viewerLevelBelow({ item: TICKET }, null)).toEqual({ item: LIST })
+  test("on its delegator's page a ticket goes back to its board, with or without the board as the floor", () => {
+    expect(viewerLevelBelow({ item: TICKET, widthPx: 440 }, LIST, "deleg")).toEqual({ item: LIST, widthPx: 440 })
+    // A phone: the delegator's page, with no floor.
+    expect(viewerLevelBelow({ item: TICKET }, null, "deleg")).toEqual({ item: LIST })
+  })
+
+  test("opened from a link in another chat, a ticket has no board under it", () => {
+    // An ordinary chat: the pane shuts.
+    expect(viewerLevelBelow({ item: TICKET }, null, "ordinary")).toBe("closed")
+    // Another delegator's page: its own board, the page's floor.
+    const otherBoard = { kind: "delegated", chatId: "other" } as const
+    expect(viewerLevelBelow({ item: TICKET }, otherBoard, "other")).toEqual({ item: otherBoard })
   })
 
   test("a chat opened from a ticket goes back to the ticket, and keeps it through its trail", () => {

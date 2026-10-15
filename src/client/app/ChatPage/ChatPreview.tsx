@@ -131,7 +131,8 @@ export const ChatPreview = memo(function ChatPreview({ item, context, onClose }:
   // Nothing, for a chat opened from an ordinary chat's transcript, which has
   // only a Close.
   const floor = useViewerStore((store) => store.floor)
-  const below = viewerLevelBelow({ item }, floor)
+  const pageChatKey = useViewerStore((store) => store.chatKey)
+  const below = viewerLevelBelow({ item }, floor, pageChatKey || null)
   const backLabel = below === "closed"
     ? null
     : below.item.kind === "chat"

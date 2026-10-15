@@ -17,6 +17,7 @@ import { getServerProviderCatalog, SERVER_PROVIDERS } from "./provider-catalog"
 import {
   compareTicketsByActivity,
   ticketAttentionCount,
+  ticketLinkPath,
   type TicketArtifact,
   type TicketChatInfo,
   type TicketChatState,
@@ -42,6 +43,16 @@ import {
   ScheduleRunner,
   type ScheduleFireResult,
 } from "./schedules"
+
+/**
+ * The ticket a hand-off's result names: `ticket: { id, number, link }`, which
+ * clients read off the tool result, and `link` the agent copies to link it.
+ */
+interface HandedOffTicket { id: string; number: number; link: string }
+
+function handedOffTicket(delegatorChatId: string, ticket: Pick<TicketRecord, "id" | "number">): HandedOffTicket {
+  return { id: ticket.id, number: ticket.number, link: ticketLinkPath(delegatorChatId, ticket.id) }
+}
 
 /** A composer's settings for a turn, as `chat.send` carries them: what a ticket reply runs the delegator with. */
 type TurnSettings = Partial<Pick<Extract<ClientCommand, { type: "chat.send" }>, "provider" | "model" | "modelOptions" | "planMode" | "autoPlan">>
@@ -1011,7 +1022,7 @@ export class ChatOrchestrator {
     const chat = this.requireChat(forked.result.chatId)
     if (input.title?.trim()) await this.commands.rename(chat.id, input.title)
     // Results name the ticket as `ticket: { id, number }`, which clients read off a hand-off's tool result.
-    let handedOff: { id: string; number: number } | undefined
+    let handedOff: HandedOffTicket | undefined
     if (input.message) {
       const run = this.resolveRun(actorChatId, input, {
         provider: chat.provider,
@@ -1024,7 +1035,7 @@ export class ChatOrchestrator {
       // A copy with no message has no work yet and owes nothing, but it is
       // the ticket's: the hand-off is what links it.
       const { ticket: record } = await this.startHandoff(actorChatId, ticket, chat.id, { outstanding: false })
-      handedOff = { id: record.id, number: record.number }
+      handedOff = handedOffTicket(actorChatId, record)
     }
     this.push({ ...forked.changed, chatIds: [chat.id] })
     return { ...this.summarize(this.requireChat(chat.id)), ...(handedOff ? { ticket: handedOff } : {}) }
@@ -1051,7 +1062,7 @@ export class ChatOrchestrator {
     // report it earns is addressed by the link.
     const delegating = Boolean(this.requireChat(actorChatId).delegator)
     const adoption = input.adopt || delegating ? await this.adopt(actorChatId, target, { forced: delegating && !input.adopt }) : null
-    let sent: { queuedMessageId?: string; ticket?: { id: string; number: number } }
+    let sent: { queuedMessageId?: string; ticket?: HandedOffTicket }
     try {
       sent = await this.send(actorChatId, target, input.message, run, {
         // Only its own parent is owed a sub-chat's result.
@@ -1162,7 +1173,7 @@ export class ChatOrchestrator {
     content: string,
     run: ReturnType<ChatOrchestrator["resolveRun"]>,
     options: { report: boolean; steer?: boolean; ticket?: TicketTarget | null },
-  ): Promise<{ queuedMessageId?: string; ticket?: { id: string; number: number } }> {
+  ): Promise<{ queuedMessageId?: string; ticket?: HandedOffTicket }> {
     const source: MessageSource = { kind: "agent", chatId: actorChatId }
     // Marked before the turn starts: a turn that fails at once still ends, and
     // that end is what sends the report.
@@ -1172,7 +1183,7 @@ export class ChatOrchestrator {
     try {
       if (options.ticket) ({ ticket, delegationId } = await this.startHandoff(actorChatId, options.ticket, target.id))
       if (delegationId) this.sendingHandoffs.add(delegationId)
-      const handedOff = ticket ? { ticket: { id: ticket.id, number: ticket.number } } : {}
+      const handedOff = ticket ? { ticket: handedOffTicket(actorChatId, ticket) } : {}
       if (options.steer) {
         const { provider, model, effort, planMode, autoPlan } = run
         // A steer either starts the message or throws, so nothing is left queued.
@@ -2259,7 +2270,7 @@ export class ChatOrchestrator {
     const board = this.requireBoard(actorChatId)
     const ticket = await board.create(actorChatId, input)
     this.push({ sidebar: true, chatIds: [actorChatId] })
-    return { ticketId: ticket.id, number: ticket.number }
+    return { ticketId: ticket.id, number: ticket.number, link: ticketLinkPath(actorChatId, ticket.id) }
   }
 
   async updateTicket(actorChatId: string, input: { ticketId: string; title?: string; body?: string; status?: "done" | "open" }) {

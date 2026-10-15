@@ -3,6 +3,8 @@ import type { AgentProvider, ChatAttachment, ModelOptions } from "../../shared/t
 import {
   compareTicketsByActivity,
   TICKET_ID_PATTERN,
+  TICKET_LINK_PARAM,
+  ticketLinkPath,
   ticketActivity,
   type TicketChatLink,
   type TicketChatState,
@@ -431,12 +433,44 @@ export function ticketReplyCommand(
 
 // ── Links ─────────────────────────────────────────────────────────────────
 
-/** The query parameter that opens a ticket over its delegator's chat. */
-export const TICKET_LINK_PARAM = "ticket"
+export { TICKET_LINK_PARAM, ticketLinkPath }
 
-/** A ticket's address: its delegator's chat, with the ticket open in the pane. */
-export function ticketLinkPath(chatId: string, ticketId: string): string {
-  return `/chat/${encodeURIComponent(chatId)}?${TICKET_LINK_PARAM}=${encodeURIComponent(ticketId)}`
+/**
+ * Whether a click on a ticket's link opens it in the page's pane: a plain
+ * click, on a page with a pane that shows chats. A modified or middle click,
+ * or a page with no pane, follows the address instead.
+ */
+export function opensTicketInPane(
+  event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean },
+  canPreview: boolean,
+): boolean {
+  return canPreview && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+}
+
+/**
+ * A click on a ticket's link: in the pane when `opensTicketInPane` says so,
+ * and the address's otherwise. `open` is what puts a ticket in the pane.
+ */
+export function handleTicketLinkClick(
+  event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; defaultPrevented: boolean; preventDefault: () => void },
+  ticket: { chatId: string; ticketId: string },
+  { canPreview, open }: { canPreview: boolean; open: (ticket: { chatId: string; ticketId: string }) => void },
+) {
+  if (event.defaultPrevented || !opensTicketInPane(event, canPreview)) return
+  event.preventDefault()
+  open(ticket)
+}
+
+/**
+ * The ticket a link in a message names, `/chat/<delegatorChatId>?ticket=<ticketId>`
+ * (`ticketLinkPath`), from the path a chat link parses to (`parseChatLink`).
+ * Null for a link to a chat alone, and for anything that is not a ticket id.
+ */
+export function parseTicketLink(path: string): { chatId: string; ticketId: string } | null {
+  const match = /^\/chat\/([a-zA-Z0-9_-]+)\/?(\?[^#]*)?/.exec(path)
+  if (!match?.[2]) return null
+  const ticketId = readTicketLinkParam(match[2])
+  return ticketId ? { chatId: match[1]!, ticketId } : null
 }
 
 /** The ticket a page's query asks to open, or null. Anything that is not a ticket id is ignored. */

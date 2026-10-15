@@ -57,8 +57,11 @@ describe("buildKannaSystemInstructions", () => {
     expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("So is anything asked after a ticket is Done.")
     expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("the same piece of work, or a new request?")
     expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("The ticket separates the asks, not the chat")
+    // What it tells the user about is the ticket, which opens in the pane.
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("link its ticket, not the chat: [#8 Title](link)")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Link a chat only when the user needs the chat itself.")
     // Every delegator turn pays for it.
-    expect(KANNA_DELEGATOR_INSTRUCTIONS.length).toBeLessThan(2_000)
+    expect(KANNA_DELEGATOR_INSTRUCTIONS.length).toBeLessThan(2_200)
   })
 
   test("names only tools that exist", () => {

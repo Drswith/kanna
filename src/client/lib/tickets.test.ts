@@ -7,6 +7,8 @@ import {
   formatTicketNumbers,
   groupTicketBoard,
   handoffTicketOf,
+  opensTicketInPane,
+  parseTicketLink,
   readTicketLinkParam,
   repeatHandoffIds,
   reportTicketNumbers,
@@ -349,5 +351,27 @@ describe("ticketRepliesLabel", () => {
     expect(ticketRepliesLabel(0)).toBe("No replies yet")
     expect(ticketRepliesLabel(1)).toBe("1 reply")
     expect(ticketRepliesLabel(3)).toBe("3 replies")
+  })
+})
+
+describe("a ticket's link in a message", () => {
+  test("names its delegator and ticket", () => {
+    expect(parseTicketLink("/chat/chat-1?ticket=tk_6f0c2a")).toEqual({ chatId: "chat-1", ticketId: "tk_6f0c2a" })
+    expect(parseTicketLink("/chat/chat-1/?a=1&ticket=tk_6f0c2a#end")).toEqual({ chatId: "chat-1", ticketId: "tk_6f0c2a" })
+  })
+
+  test("a chat's own link, and anything not a ticket id, is no ticket", () => {
+    expect(parseTicketLink("/chat/chat-1")).toBeNull()
+    expect(parseTicketLink("/chat/chat-1?ticket=nope")).toBeNull()
+    expect(parseTicketLink("/settings?ticket=tk_6f0c2a")).toBeNull()
+  })
+
+  test("a plain click opens it in the pane; a modified or middle click, or a page with no pane, follows the address", () => {
+    const click = { button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false }
+    expect(opensTicketInPane(click, true)).toBe(true)
+    expect(opensTicketInPane({ ...click, metaKey: true }, true)).toBe(false)
+    expect(opensTicketInPane({ ...click, ctrlKey: true }, true)).toBe(false)
+    expect(opensTicketInPane({ ...click, button: 1 }, true)).toBe(false)
+    expect(opensTicketInPane(click, false)).toBe(false)
   })
 })
