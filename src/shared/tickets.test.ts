@@ -94,6 +94,28 @@ describe("a ticket's column", () => {
     const summary = summarize(ticket({ handoffs: [handoff("gone", true)] }), {})
     expect(summary).toMatchObject({ state: "done", statusLine: "Finished", chats: [] })
   })
+
+  // A chat given several tickets in a row is busy with the first while the
+  // rest wait in its queue. Its own state says "working" for all of them.
+  test("work still in a chat's queue is queued, not working", () => {
+    const queued = { ...handoff("a", true), turn: null, queuedMessageId: "q1" }
+    const summary = summarize(ticket({ handoffs: [queued] }), { a: "working" })
+    expect(summary).toMatchObject({ state: "in_progress", statusLine: "Queued in Chat a", chats: [{ chatId: "a", state: "working", outstanding: true, queued: true }] })
+    // Asking the user about the work ahead of it does not put this ticket in Waiting on you.
+    expect(summarize(ticket({ handoffs: [queued] }), { a: "waiting_on_you" })).toMatchObject({ state: "in_progress", statusLine: "Queued in Chat a" })
+    expect(summarize(ticket({ handoffs: [queued, { ...handoff("b", true, 210), turn: null, queuedMessageId: "q2" }] }), { a: "working", b: "working" }))
+      .toMatchObject({ statusLine: "Queued in 2 chats" })
+  })
+
+  test("a chat at work on the ticket is not queued, though another of its messages for it waits", () => {
+    const placed = { ...handoff("a", true), turn: 3 }
+    const waiting = { ...handoff("a", true, 210), turn: null, queuedMessageId: "q1" }
+    const [link] = ticketChatLinks(ticket({ handoffs: [placed, waiting] }), chats({ a: "working" }))
+    expect(link!.queued).toBeUndefined()
+    expect(summarize(ticket({ handoffs: [placed, waiting] }), { a: "working" })).toMatchObject({ statusLine: "Chat a is working" })
+    // A send still under way (no queue id yet) is not queued either.
+    expect(ticketChatLinks(ticket({ handoffs: [{ ...handoff("a", true), turn: null }] }), chats({ a: "working" }))[0]!.queued).toBeUndefined()
+  })
 })
 
 describe("closing and reopening", () => {

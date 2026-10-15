@@ -69,6 +69,23 @@ describe("TicketStore", () => {
     expect(reloaded).not.toHaveProperty("readAt")
   })
 
+  test("a withdrawn hand-off goes with its sent-to line, and stays gone after a restart", async () => {
+    const store = await reopen()
+    await fill(store)
+    await store.append("delegator", [
+      { type: "handoff_added", at: 400, handoff: { delegationId: "dl_2", ticketId: "tk_aaaaaa", childChatId: "child", createdAt: 400, outstanding: true, turn: null } },
+      { type: "history_added", at: 400, event: { id: "th_2", ticketId: "tk_aaaaaa", createdAt: 400, kind: "sent_to", chatId: "child" } },
+    ])
+    await store.append("delegator", [{ type: "handoff_withdrawn", at: 450, ticketId: "tk_aaaaaa", delegationId: "dl_2" }])
+    await store.flush()
+    for (const read of [store, await reopen()]) {
+      const ticket = read.get("delegator", "tk_aaaaaa")!
+      // The earlier hand-off to the same chat, and its line, are untouched.
+      expect(ticket.handoffs.map((handoff) => handoff.delegationId)).toEqual(["dl_1"])
+      expect(ticket.history.map((event) => event.id)).toEqual(["th_1"])
+    }
+  })
+
   test("settling can be kept to some tickets", async () => {
     const store = await reopen()
     await fill(store)

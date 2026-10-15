@@ -36,6 +36,12 @@ export type TicketStoreEvent = { v: typeof TICKET_LOG_VERSION; at: number } & (
   /** A hand-off's message went into the chat's queue, or into a turn of it. */
   | { type: "handoff_delivered"; ticketId: string; delegationId: string; turn?: number; queuedMessageId?: string }
   /**
+   * A hand-off whose message was taken out of the chat's queue before any
+   * turn took it: the work was never sent. The hand-off goes, and so does the
+   * "sent to" line it added, so the ticket shows no row for work no chat had.
+   */
+  | { type: "handoff_withdrawn"; ticketId: string; delegationId: string }
+  /**
    * The chat's outstanding hand-offs are settled: all of them, those on
    * `ticketIds`, or exactly `delegationIds`.
    */
@@ -104,7 +110,7 @@ export function applyTicketEvent(tickets: Map<string, TicketRecord>, delegatorCh
     ? event.reply.ticketId
     : event.type === "history_added"
       ? event.event.ticketId
-      : event.type === "handoff_delivered"
+      : event.type === "handoff_delivered" || event.type === "handoff_withdrawn"
         ? event.ticketId
       : event.type === "handoff_added"
         ? event.handoff.ticketId
@@ -135,6 +141,17 @@ export function applyTicketEvent(tickets: Map<string, TicketRecord>, delegatorCh
       if (!handoff) return
       if (event.turn !== undefined) handoff.turn = event.turn
       if (event.queuedMessageId !== undefined) handoff.queuedMessageId = event.queuedMessageId
+      return
+    }
+    case "handoff_withdrawn": {
+      const index = ticket.handoffs.findIndex((candidate) => candidate.delegationId === event.delegationId)
+      if (index === -1) return
+      const [handoff] = ticket.handoffs.splice(index, 1)
+      // The line is written in the same batch as the hand-off, with its time.
+      const line = ticket.history.findIndex((entry) => (
+        entry.kind === "sent_to" && entry.chatId === handoff!.childChatId && entry.createdAt === handoff!.createdAt
+      ))
+      if (line !== -1) ticket.history.splice(line, 1)
       return
     }
     case "flags_set":

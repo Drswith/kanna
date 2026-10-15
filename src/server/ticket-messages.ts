@@ -5,6 +5,7 @@ import {
   type TicketDetail,
   type TicketHistoryEvent,
   type TicketRecord,
+  type TicketReply,
   type TicketState,
   type TicketSummary,
 } from "../shared/tickets"
@@ -49,11 +50,16 @@ export function ticketReportLine(tickets: readonly Pick<TicketRecord, "id" | "nu
 
 function chatsLine(links: readonly TicketChatLink[]) {
   if (links.length === 0) return "No chats have worked on it yet."
-  return `Its chats: ${links.map((link) => `"${link.title}" (chat id ${link.chatId}) ${CHAT_STATE_WORDS[link.state]}`).join("; ")}.`
+  return `Its chats: ${links.map((link) => `"${link.title}" (chat id ${link.chatId}) ${link.queued ? "queued" : CHAT_STATE_WORDS[link.state]}`).join("; ")}.`
 }
 
+/**
+ * Either answers it. It once said only "Reply on the ticket", and the
+ * delegator posted "handing this on now" before every hand-off, which the
+ * ticket's own hand-off row already said.
+ */
 function howToAnswer(ticketId: string) {
-  return `Reply on the ticket with reply_to_ticket; the user reads the ticket. Pass ticketId "${ticketId}" to create_chat, send_message or fork_chat when you hand work on.`
+  return `Answer on the ticket with reply_to_ticket, or hand the work on with ticketId "${ticketId}"; a hand-off needs no post.`
 }
 
 /**
@@ -99,6 +105,10 @@ function reasonText(reason: TicketNewsReason, chatTitle: (chatId: string) => str
 /**
  * The nudge: once, after a delegator's turns run out, for tickets that got a
  * user reply or a final report it neither wrote on nor handed work from.
+ *
+ * It lets the delegator post nothing. Told to "post on each", a delegator
+ * filled a dozen tickets with "Nothing new since my last post" whenever a
+ * nudge listed news it had already passed on.
  */
 export function buildTicketNudge(
   unanswered: ReadonlyArray<{ ticket: Pick<TicketRecord, "id" | "number" | "title">; reasons: readonly TicketNewsReason[] }>,
@@ -110,14 +120,21 @@ export function buildTicketNudge(
   })
   return [
     "<system-message>",
-    "Kanna here, not the user. These tickets got news that you have not posted on:",
+    "Kanna here, not the user. These tickets got news since you last posted on them:",
     ...lines,
-    "The user follows the work on its tickets, not in this chat. Post on each with reply_to_ticket: what came back, what happens next, or a question with asksUser: true. If you are handing the work on, one line saying so is enough.",
+    "The user reads the tickets, not this chat. Post with reply_to_ticket on each one where the news changes what the user knows: what came back, or a question with asksUser: true. If you already posted it, or you handed the work on, post nothing.",
     "</system-message>",
   ].join("\n")
 }
 
 // ── Tool results ─────────────────────────────────────────────────────────
+
+/** What `reply_to_ticket` adds when the ticket still waits on the user for an earlier question. */
+export function stillAskingNote(ticket: Pick<TicketRecord, "number">, question: Pick<TicketReply, "id" | "text">) {
+  const firstLine = question.text.split("\n").find((line) => line.trim())?.trim() ?? ""
+  const quoted = firstLine.length > 120 ? `${firstLine.slice(0, 119)}…` : firstLine
+  return `#${ticket.number} still waits on the user for your question (${question.id})${quoted ? `: "${quoted}"` : ""}. If that is settled, post again with asksUser: false.`
+}
 
 function iso(timestamp: number) {
   return new Date(timestamp).toISOString()
@@ -130,6 +147,7 @@ function agentChat(link: TicketChatLink) {
     link: `/chat/${link.chatId}`,
     state: link.state,
     ...(link.outstanding ? { outstanding: true as const } : {}),
+    ...(link.queued ? { queued: true as const } : {}),
     lastSentAt: iso(link.lastSentAt),
   }
 }

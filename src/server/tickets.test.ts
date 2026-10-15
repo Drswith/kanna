@@ -117,6 +117,7 @@ async function setup() {
   agent.onChatSettled = (chatId) => orchestrator.handleChatSettled(chatId)
   agent.onChatStopped = (chatId) => orchestrator.handleChatStopped(chatId)
   store.onTurnStarted = (chatId) => orchestrator.handleTurnStarted(chatId)
+  store.onQueuedMessageRemoved = (chatId, queuedMessageId, taken) => orchestrator.handleQueuedMessageRemoved(chatId, queuedMessageId, taken)
   cleanups.push(async () => {
     orchestrator.dispose()
     agent.dispose()
@@ -202,15 +203,21 @@ describe("hand-offs from a delegator", () => {
     codex.turn(first.chatId).events.push({ type: "session_token", sessionToken: "thread-1" })
     codex.finish(first.chatId, "Tagged.")
     await until(() => !orchestrator["agent"].isBusy(first.chatId), "the first chat at rest")
+    await until(() => board.summary(board.get(delegator, ticketId)!).state === "done", "the ticket done")
     const fork = await call("fork_chat", { chatId: first.chatId, ticketId })
     expect(fork.error).toBeUndefined()
     const link = `/chat/${delegator}?ticket=${ticketId}`
-    expect(fork.ticket).toEqual({ id: ticketId, number: 1, link })
+    // Handing work on a Done ticket reopens it, and the result says so.
+    const reopened = { id: ticketId, number: 1, link, reopened: true, note: "Reopened #1, which was Done. A new ask needs a new ticket." }
+    expect(fork.ticket).toEqual(reopened)
     const sent = await call("send_message", { chatId: first.chatId, message: "now publish", ticketId })
-    expect(sent.ticket).toEqual({ id: ticketId, number: 1, link })
+    // A copy with no message owes nothing, so the ticket was Done again.
+    expect(sent.ticket).toEqual(reopened)
+    // An open ticket is not reopened, and the result says nothing of it.
+    expect((await call("send_message", { chatId: first.chatId, message: "and the notes", ticketId })).ticket).toEqual({ id: ticketId, number: 1, link })
     expect(board.get(delegator, ticketId)!.handoffs.map((handoff) => [handoff.childChatId, handoff.outstanding]))
       // The first was settled by the report of the turn it asked for.
-      .toEqual([[first.chatId, false], [fork.chatId, false], [first.chatId, true]])
+      .toEqual([[first.chatId, false], [fork.chatId, false], [first.chatId, true], [first.chatId, true]])
   })
 
   test("an ordinary chat hands off as before, and has no board", async () => {
@@ -325,6 +332,60 @@ describe("reports to a delegator", () => {
     expect(prompts(delegator).some((prompt) => prompt.source?.kind === "ticket_nudge")).toBe(false)
   })
 
+  test("a queued hand-off taken out of the queue is withdrawn: no row, no finished line, no nudge", async () => {
+    // Ticket #24: the delegator removed a ticket's queued message to move a
+    // commit ahead of it and sent the work again. The commit's turn took the
+    // orphaned hand-off, and its report said the ticket had finished.
+    const { startChat, toolsFor, board, codex, prompts } = await setup()
+    const delegator = await startChat()
+    const call = toolsFor(delegator)
+    const a = await call("create_chat", { message: "do A", title: "Worker", ticket: { title: "A" } })
+    const child = a.chatId as string
+    const b = await call("send_message", { chatId: child, message: "do B", ticket: { title: "B" } })
+    const c = await call("send_message", { chatId: child, message: "do C", ticket: { title: "C" } })
+    const ticket = (id: string) => board.get(delegator, id)!
+    // Behind A, B and C wait in the queue: queued, not working.
+    expect(board.summary(ticket(b.ticket.id))).toMatchObject({ state: "in_progress", statusLine: "Queued in Worker", chats: [{ chatId: child, state: "working", queued: true }] })
+
+    expect((await call("update_queued_message", { chatId: child, queuedMessageId: b.queuedMessageId, action: "remove" })).error).toBeUndefined()
+    // No chat ever had B's work, so the ticket has no row for it.
+    expect(ticket(b.ticket.id)).toMatchObject({ handoffs: [], history: [] })
+    expect(board.summary(ticket(b.ticket.id))).toMatchObject({ statusLine: "Not started", chats: [] })
+    codex.finish(delegator, "Moved C ahead.")
+
+    // A ends, and C's turn starts with C's message. It does not take B's hand-off.
+    codex.finish(child, "Did A.")
+    await until(() => codex.turnsFor(delegator).length === 2, "the report on A")
+    // Not toMatchObject with expect.any: Bun writes the matcher into the live record.
+    expect(typeof ticket(c.ticket.id).handoffs[0]!.turn).toBe("number")
+    expect(board.summary(ticket(c.ticket.id)).chats[0]!.queued).toBeUndefined()
+    await call("reply_to_ticket", { ticketId: a.ticket.id, text: "A is done." })
+    codex.finish(delegator, "Posted.")
+    await until(() => !codex.turns.some((turn) => turn.chatId === delegator && turn.open), "the delegator at rest")
+
+    codex.finish(child, "Did C.")
+    await until(() => codex.turnsFor(delegator).length === 3, "the report on C")
+    expect(prompts(delegator)[2]!.source).toMatchObject({ kind: "report", tickets: { [child]: [c.ticket.id] } })
+    await call("reply_to_ticket", { ticketId: c.ticket.id, text: "C is done." })
+    codex.finish(delegator, "Posted.")
+    await Bun.sleep(100)
+    expect(ticket(b.ticket.id).history).toEqual([])
+    expect(prompts(delegator).some((prompt) => prompt.source?.kind === "ticket_nudge")).toBe(false)
+  })
+
+  test("a queued hand-off the user takes out of the queue is withdrawn too", async () => {
+    const { startChat, toolsFor, board, agent } = await setup()
+    const delegator = await startChat()
+    const call = toolsFor(delegator)
+    const a = await call("create_chat", { message: "do A", ticket: { title: "A" } })
+    const b = await call("send_message", { chatId: a.chatId, message: "do B", ticket: { title: "B" } })
+    // The composer's remove button sends this; the store's hook does the rest.
+    await agent.dequeue({ type: "message.dequeue", chatId: a.chatId, queuedMessageId: b.queuedMessageId })
+    await until(() => board.get(delegator, b.ticket.id)!.handoffs.length === 0, "the withdrawal")
+    expect(board.get(delegator, b.ticket.id)!.history).toEqual([])
+    expect(board.get(delegator, a.ticket.id)!.handoffs).toHaveLength(1)
+  })
+
   test("a hand-off steered into a running turn settles with that turn", async () => {
     const { startChat, toolsFor, board, codex, prompts } = await setup()
     const delegator = await startChat()
@@ -396,6 +457,9 @@ describe("the nudge", () => {
     expect(nudge.source).toEqual({ kind: "ticket_nudge", ticketIds: [child.ticket.id] })
     expect(nudge.content).toContain(`#1 "Escape hold" (${child.ticket.id})`)
     expect(nudge.content).toContain("reply_to_ticket")
+    // Nothing to say is allowed: the nudge once drew "Nothing new" posts.
+    expect(nudge.content).toContain("If you already posted it, or you handed the work on, post nothing.")
+    expect(nudge.content).not.toContain("one line saying so")
     expect(stripSystemMessages(nudge.content)).toBe("")
 
     // Its own turn ending without a post earns no second one.
@@ -476,7 +540,8 @@ describe("the user's ticket replies", () => {
     expect(wire).toContain("It is In progress.")
     expect(wire).toContain(`"Flicker fix" (chat id ${child.chatId}) working`)
     expect(wire).toContain("reply_to_ticket")
-    expect(wire).toContain(`Pass ticketId "${ticketId}"`)
+    // Either answers it; a hand-off is not announced.
+    expect(wire).toContain(`hand the work on with ticketId "${ticketId}"; a hand-off needs no post.`)
   })
 
   test("answering the delegator's question tells it the ticket is In progress, not still waiting", async () => {
@@ -731,6 +796,26 @@ describe("the board on the snapshot", () => {
     expect(listed.tickets.map((ticket: { ticketId: string }) => ticket.ticketId)).toContain(ids[2])
   })
 
+  test("a question can be withdrawn, and a post under one still open says so", async () => {
+    const { startChat, toolsFor, board } = await setup()
+    const delegator = await startChat()
+    const call = toolsFor(delegator)
+    const { ticketId } = await call("create_ticket", { title: "Wording" })
+    const asked = await call("reply_to_ticket", { ticketId, text: "Say “Closed by the delegator”?\nOr keep the chat's title.", asksUser: true })
+    expect(asked).toEqual({ replyId: expect.stringMatching(/^rp_/) })
+
+    // A status post leaves the question open, and the result says so.
+    const later = await call("reply_to_ticket", { ticketId, text: "The merge fix is pushed." })
+    expect(later.note).toBe(`#1 still waits on the user for your question (${asked.replyId}): "Say “Closed by the delegator”?". If that is settled, post again with asksUser: false.`)
+    expect(board.stateOf(board.require(delegator, ticketId))).toBe("waiting_on_you")
+
+    // Settled in the chat: withdrawn, and the ticket no longer waits.
+    expect(await call("reply_to_ticket", { ticketId, text: "Settled in chat: keeping the title.", asksUser: false })).toEqual({ replyId: expect.stringMatching(/^rp_/) })
+    expect(board.require(delegator, ticketId).asksUser).toBe(false)
+    expect(board.stateOf(board.require(delegator, ticketId))).toBe("in_progress")
+    expect((await call("reply_to_ticket", { ticketId, text: "Nothing asked." })).note).toBeUndefined()
+  })
+
   test("read_ticket and list_tickets give the agent the ticket and its chats", async () => {
     const { startChat, toolsFor } = await setup()
     const delegator = await startChat()
@@ -783,5 +868,20 @@ describe("the board on the snapshot", () => {
     expect(reply.artifacts).toMatchObject([{ type: "visualization", title: "Board", url: expect.stringContaining(`/${delegator}/media/visualization-`) }])
     expect(JSON.stringify(reply)).not.toContain("<p>Board</p>")
     expect(await call("show_visualization", { title: "Nope", html: "<p>x</p>", ticketId: "tk_nope00" })).toMatchObject({ error: expect.stringContaining("not found") })
+  })
+
+  test("show_visualization with text posts the mock and its words as one reply, and can ask", async () => {
+    const { startChat, toolsFor, board } = await setup()
+    const delegator = await startChat()
+    const call = toolsFor(delegator)
+    const { ticketId } = await call("create_ticket", { title: "Chat list" })
+    const shown = await call("show_visualization", { title: "Three options", html: "<p>A B C</p>", ticketId, text: "A, B or C? **A** is my pick.", asksUser: true })
+    expect(shown.error).toBeUndefined()
+    const replies = board.get(delegator, ticketId)!.replies
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).toMatchObject({ text: "A, B or C? **A** is my pick.", asksUser: true, artifacts: [{ type: "visualization", title: "Three options" }] })
+    expect(board.stateOf(board.require(delegator, ticketId))).toBe("waiting_on_you")
+    // Words for a ticket reply need the ticket.
+    expect(await call("show_visualization", { title: "Loose", html: "<p>x</p>", text: "hi" })).toMatchObject({ error: expect.stringContaining("ticketId") })
   })
 })

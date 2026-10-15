@@ -159,6 +159,13 @@ export interface TicketChatLink {
   state: TicketChatState
   /** A hand-off on this ticket still waits on this chat's final report. */
   outstanding: boolean
+  /**
+   * Every outstanding hand-off to it on this ticket still waits in the chat's
+   * queue, behind work it is doing for something else: this ticket's work has
+   * not started. `state` is still the chat's own (often `working`), so read
+   * this first. Absent otherwise.
+   */
+  queued?: true
   /** The latest hand-off to it on this ticket. */
   lastSentAt: number
 }
@@ -170,7 +177,7 @@ export interface TicketSummary {
   number: number
   title: string
   state: TicketState
-  /** One line on how it stands: "Sub-Chat Preview Panel is working", "Asks you", "2 chats finished". */
+  /** One line on how it stands: "Sub-Chat Preview Panel is working", "Queued in Web UI", "Asks you", "2 chats finished". */
   statusLine: string
   /** Every chat it was handed to, latest hand-off first. */
   chats: TicketChatLink[]
@@ -216,9 +223,12 @@ function lookup(chats: ChatLookup, chatId: string): TicketChatInfo | undefined {
  */
 export function ticketChatLinks(ticket: TicketRecord, chats: ChatLookup): TicketChatLink[] {
   const byChat = new Map<string, TicketChatLink>()
+  // Per chat: whether any outstanding hand-off to it has left the queue.
+  const started = new Set<string>()
   for (const handoff of ticket.handoffs) {
     const info = lookup(chats, handoff.childChatId)
     if (!info) continue
+    if (handoff.outstanding && !isQueuedHandoff(handoff)) started.add(handoff.childChatId)
     const link = byChat.get(handoff.childChatId)
     if (link) {
       link.outstanding ||= handoff.outstanding
@@ -233,7 +243,15 @@ export function ticketChatLinks(ticket: TicketRecord, chats: ChatLookup): Ticket
       })
     }
   }
+  for (const link of byChat.values()) {
+    if (link.outstanding && !started.has(link.chatId)) link.queued = true
+  }
   return [...byChat.values()].sort((a, b) => b.lastSentAt - a.lastSentAt)
+}
+
+/** A hand-off whose message waits in its chat's queue: in no turn yet. */
+export function isQueuedHandoff(handoff: Pick<TicketHandoff, "outstanding" | "turn" | "queuedMessageId">): boolean {
+  return handoff.outstanding && handoff.turn === null && handoff.queuedMessageId !== undefined
 }
 
 /**
@@ -241,8 +259,9 @@ export function ticketChatLinks(ticket: TicketRecord, chats: ChatLookup): Ticket
  *
  * 1. Waiting on you: a chat with an outstanding hand-off is waiting for the
  *    user, or the delegator asked the user (`asksUser`).
- * 2. In progress: a chat with an outstanding hand-off is working, or the
- *    user replied and the delegator has not (`awaitingDelegator`).
+ * 2. In progress: a chat with an outstanding hand-off is working, the work
+ *    waits in a chat's queue (`queued`), or the user replied and the
+ *    delegator has not (`awaitingDelegator`).
  * 3. Done: explicitly closed. A working or waiting chat beats a close (1, 2).
  * 4. In progress: no hand-offs yet, a hand-off still outstanding (its chat
  *    is idle and the report is on its way), or reopened by hand with no
@@ -250,12 +269,15 @@ export function ticketChatLinks(ticket: TicketRecord, chats: ChatLookup): Ticket
  * 5. Done.
  *
  * A chat working for two tickets is active on both while both hand-offs are
- * outstanding: only outstanding hand-offs make a chat count here.
+ * outstanding: only outstanding hand-offs make a chat count here. One whose
+ * hand-off for this ticket is still queued is not at work on it, so its own
+ * state (asking about other work, say) does not count, only that it is queued.
  */
 export function deriveTicketState(ticket: TicketRecord, links: readonly TicketChatLink[]): TicketState {
   const live = links.filter((link) => link.outstanding)
-  if (ticket.asksUser || live.some((link) => link.state === "waiting_on_you")) return "waiting_on_you"
-  if (ticket.awaitingDelegator || live.some((link) => link.state === "working")) return "in_progress"
+  const started = live.filter((link) => !link.queued)
+  if (ticket.asksUser || started.some((link) => link.state === "waiting_on_you")) return "waiting_on_you"
+  if (ticket.awaitingDelegator || started.some((link) => link.state === "working") || live.some((link) => link.queued)) return "in_progress"
   if (ticket.closed?.status === "done") return "done"
   if (ticket.handoffs.length === 0 || live.length > 0) return "in_progress"
   const reopened = ticket.closed?.status === "open" ? ticket.closed.at : null
@@ -280,16 +302,20 @@ function chatCount(count: number) {
 /** The board's one line for a ticket. */
 export function ticketStatusLine(ticket: TicketRecord, state: TicketState, links: readonly TicketChatLink[]): string {
   const live = links.filter((link) => link.outstanding)
+  const started = live.filter((link) => !link.queued)
   if (state === "waiting_on_you") {
-    const asking = live.filter((link) => link.state === "waiting_on_you")
+    const asking = started.filter((link) => link.state === "waiting_on_you")
     if (asking.length === 1) return `Waiting on you in ${asking[0]!.title}`
     if (asking.length > 1) return `${chatCount(asking.length)} waiting on you`
     return "Asks you"
   }
   if (state === "in_progress") {
-    const working = live.filter((link) => link.state === "working")
+    const working = started.filter((link) => link.state === "working")
     if (working.length === 1) return `${working[0]!.title} is working`
     if (working.length > 1) return `${working.length} chats working`
+    const queued = live.filter((link) => link.queued)
+    if (queued.length === 1) return `Queued in ${queued[0]!.title}`
+    if (queued.length > 1) return `Queued in ${chatCount(queued.length)}`
     if (ticket.awaitingDelegator) return "Waiting on the delegator"
     if (live.length === 1) return `${live[0]!.title} is reporting`
     if (live.length > 1) return `${live.length} chats reporting`

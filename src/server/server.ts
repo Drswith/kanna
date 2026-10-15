@@ -222,6 +222,9 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
     turnFiles.beginTurn(chatId)
     orchestrator.handleTurnStarted(chatId)
   }
+  store.onQueuedMessageRemoved = (chatId, queuedMessageId, taken) => {
+    orchestrator.handleQueuedMessageRemoved(chatId, queuedMessageId, taken)
+  }
   // A finished turn is the likeliest moment for the dirty set to have changed,
   // so probe that one project then — after recording the turn's own files, so
   // the broadcast that follows already reflects them.

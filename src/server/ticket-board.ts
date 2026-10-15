@@ -148,6 +148,11 @@ export class TicketBoard {
     return this.outstandingFor(delegatorChatId, childChatId).map(({ handoff }) => handoff).filter((handoff) => handoff.turn === null)
   }
 
+  /** The hand-offs a queued message carries. */
+  carriedBy(delegatorChatId: string, childChatId: string, queuedMessageId: string): TicketHandoff[] {
+    return this.queuedFor(delegatorChatId, childChatId).filter((handoff) => handoff.queuedMessageId === queuedMessageId)
+  }
+
   /** Of these chats, the ones no hand-off links to any ticket. */
   untracked(delegatorChatId: string, chatIds: readonly string[]): string[] {
     const linked = new Set<string>()
@@ -241,9 +246,10 @@ export class TicketBoard {
 
   /**
    * A reply on the ticket. The delegator's answers a user reply
-   * (`awaitingDelegator`) and may ask one (`asksUser`); the user's answers a
-   * question, waits on the delegator, reads the ticket, and reopens it if it
-   * was Done.
+   * (`awaitingDelegator`) and may ask one (`asksUser: true`) or withdraw the
+   * one it asked (`asksUser: false`, for a question settled elsewhere); the
+   * user's answers a question, waits on the delegator, reads the ticket, and
+   * reopens it if it was Done.
    */
   async reply(delegatorChatId: string, ticketId: string, input: {
     author: TicketAuthor
@@ -275,7 +281,7 @@ export class TicketBoard {
       this.noteNews(delegatorChatId, ticket.id, { kind: "user_reply" }, at)
     } else {
       events.push({ type: "reply_added", at, reply })
-      events.push({ type: "flags_set", at, ticketId: ticket.id, awaitingDelegator: false, ...(input.asksUser ? { asksUser: true } : {}) })
+      events.push({ type: "flags_set", at, ticketId: ticket.id, awaitingDelegator: false, ...(input.asksUser !== undefined ? { asksUser: input.asksUser } : {}) })
       this.noteAddressed(delegatorChatId, ticket.id, at)
     }
     await this.store.append(delegatorChatId, events)
@@ -284,15 +290,16 @@ export class TicketBoard {
 
   /**
    * The delegator handed work on this ticket to a chat. A Done ticket comes
-   * back out of it, and a user reply it was waiting on is answered.
+   * back out of it (`reopened`), and a user reply it was waiting on is answered.
    */
   async handoff(delegatorChatId: string, ticketId: string, childChatId: string, options?: { outstanding?: boolean }) {
     const ticket = this.require(delegatorChatId, ticketId)
     const at = this.now()
     const delegationId = shortId("dl")
     const outstanding = options?.outstanding ?? true
+    const reopen = this.reopenEvents(ticket, at, { kind: "reopened", cause: "chat_started", chatId: childChatId })
     await this.store.append(delegatorChatId, [
-      ...this.reopenEvents(ticket, at, { kind: "reopened", cause: "chat_started", chatId: childChatId }),
+      ...reopen,
       {
         type: "handoff_added",
         at,
@@ -303,7 +310,18 @@ export class TicketBoard {
       ...(ticket.awaitingDelegator ? [{ type: "flags_set", at, ticketId: ticket.id, awaitingDelegator: false } as const] : []),
     ])
     this.noteAddressed(delegatorChatId, ticket.id, at)
-    return delegationId
+    return { delegationId, reopened: reopen.length > 0 }
+  }
+
+  /** Hand-offs whose queued message was removed before a turn took it: never sent, so gone. */
+  async withdraw(delegatorChatId: string, handoffs: readonly TicketHandoff[]) {
+    const at = this.now()
+    await this.store.append(delegatorChatId, handoffs.map((handoff) => ({
+      type: "handoff_withdrawn" as const,
+      at,
+      ticketId: handoff.ticketId,
+      delegationId: handoff.delegationId,
+    })))
   }
 
   /** Where a hand-off's message went: a turn of the chat, or its queue to wait for one. */
