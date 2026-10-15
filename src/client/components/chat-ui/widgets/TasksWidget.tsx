@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Check, Loader2, MessageSquare, Network, Radar, Square, X, type LucideIcon } from "lucide-react"
+import { Loader2, MessageSquare, Network, Radar, Square } from "lucide-react"
 import { PROVIDERS, type SubagentActivity, type TranscriptEntry } from "../../../../shared/types"
 import { cn } from "../../../lib/utils"
 import { useChatReferenceActions, useSidebarThread } from "../chat-reference"
@@ -16,6 +16,7 @@ import { WIDGET_ROW_REVEAL_CLASS, WidgetError, WidgetList, WidgetMoreRow, Widget
 import type { StopTaskControl } from "./useStopTask"
 import { SwapIn, WidgetCard } from "./WidgetCard"
 import { WidgetHoverCard } from "./WidgetHoverCard"
+import { TASK_STATUS_ICON, type StatusIcon } from "./task-status-icon"
 
 /**
  * What runs on the chat's behalf: subagents, background shells, monitors,
@@ -73,20 +74,8 @@ export function taskKindName(type: string): string {
   return KIND_NAMES[type] ?? `${type.charAt(0).toUpperCase()}${type.slice(1)}`
 }
 
-interface StatusIcon {
-  Icon: LucideIcon
-  className: string
-  label: string
-}
-
-export const TASK_STATUS_ICON: Record<SubagentActivity["status"], StatusIcon> = {
-  // Grey: work in progress is the normal state here, not something to flag.
-  running: { Icon: Loader2, className: "animate-spin text-muted-foreground", label: "Running" },
-  completed: { Icon: Check, className: "text-success", label: "Done" },
-  failed: { Icon: X, className: "text-destructive", label: "Failed" },
-  // Someone chose to end it: not an outcome to flag in red or green.
-  stopped: { Icon: Square, className: "text-muted-foreground", label: "Stopped" },
-}
+// Kept apart, in a leaf module: see there.
+export { TASK_STATUS_ICON }
 
 /**
  * A monitor waits on something else (a log line, a CI run) rather than works
