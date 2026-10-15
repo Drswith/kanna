@@ -62,8 +62,8 @@ type ThreadRowBodyProps = Pick<
  * glyph / harness icon, title, and hover-revealed Fork/Archive.
  *
  * Apart from `ThreadRow` for a surface that draws the row as part of
- * something larger and puts the menu on the whole of it (a node in the graph
- * view, where the row heads a card). Two menus, one inside the other, would
+ * something larger and puts the menu on the whole of it (a chat's card in a
+ * transcript, where the row heads the card). Two menus, one inside the other, would
  * both open on a right-click.
  *
  * Whatever else it is given goes on its element, which is how the menu's

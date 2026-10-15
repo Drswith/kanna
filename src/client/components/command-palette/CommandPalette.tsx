@@ -26,7 +26,6 @@ import {
   Lock,
   LockOpen,
   MessageCircle,
-  Network,
   PanelLeft,
   PanelRight,
   Paperclip,
@@ -334,12 +333,9 @@ export function CommandPalette({ state }: { state: KannaState }) {
   const isMac = (state.localProjects?.machine.platform ?? "darwin") === "darwin"
   // Reactive so the action's label flips between Focus and Exit Focus Mode.
   const focusModeEnabled = useFocusModeEnabled()
-  // The graph is shown in the previewer's pane, so only where a page has one
-  // (the same count a sub-chat's click reads: `chatPreviewHosts`).
-  const canShowGraph = useViewerStore((store) => store.chatPreviewHosts > 0)
-  // Reactive so the label says what choosing it will do. A chat picked from
-  // the graph has taken the graph's place, so the graph is not "shown" then.
-  const graphShown = useChatViewer()?.item.kind === "graph"
+  // The delegator's board is shown in the previewer's pane, so only where a
+  // page has one (the same count a sub-chat's click reads: `chatPreviewHosts`).
+  const canShowPane = useViewerStore((store) => store.chatPreviewHosts > 0)
   // The same open-ness the navbar's delegated button lights for.
   const viewerShown = useChatViewer() !== null
   // The active chat's row plus the project group that owns it (for the
@@ -928,31 +924,15 @@ export function CommandPalette({ state }: { state: KannaState }) {
       }
     }
 
-    if (state.activeChatId && canShowGraph) {
-      const graphChatId = state.activeChatId
-      list.push({
-        id: "show-graph",
-        title: graphShown ? "Hide Graph" : "Show Graph",
-        keywords: ["graph", "tree", "map", "overview", "sub-chats", "subchats", "sub chats", "delegation", "agents", "children", "show", "hide"],
-        icon: <Network className={ICON_CLASS} />,
-        run: () => {
-          close()
-          // The tree this chat is in, from its root down, beside the chat.
-          if (graphShown) useViewerStore.getState().close()
-          else useViewerStore.getState().open({ kind: "graph", chatId: graphChatId })
-        },
-      })
-    }
-
-    // The navbar's delegated button, for a delegator: the list of the chats
-    // under it, in the pane. No shortcut of its own, like Show Graph.
-    if (state.activeChatId && canShowGraph && currentChatRow?.delegator) {
+    // The navbar's tickets button, for a delegator: its tickets, in the
+    // pane, under the same icon. No shortcut of its own.
+    if (state.activeChatId && canShowPane && currentChatRow?.delegator) {
       const delegatorChatId = state.activeChatId
       list.push({
         id: "toggle-delegated",
-        title: viewerShown ? "Hide Delegated" : "Show Delegated",
-        keywords: ["delegated", "delegator", "delegate", "sub-chats", "subchats", "sub chats", "chats", "list", "pane", "show", "hide", "toggle"],
-        icon: <DelegatorIcon className={ICON_CLASS} />,
+        title: viewerShown ? "Hide Tickets" : "Show Tickets",
+        keywords: ["tickets", "ticket", "board", "delegated", "delegator", "delegate", "sub-chats", "subchats", "sub chats", "chats", "list", "pane", "show", "hide", "toggle"],
+        icon: <ListTodo className={ICON_CLASS} />,
         run: () => {
           close()
           toggleDelegatedPane(delegatorChatId)
@@ -1207,8 +1187,7 @@ export function CommandPalette({ state }: { state: KannaState }) {
     editorCommandTemplate,
     editorPreset,
     focusModeEnabled,
-    canShowGraph,
-    graphShown,
+    canShowPane,
     viewerShown,
     currentChatRow?.delegator,
     installedEditors,

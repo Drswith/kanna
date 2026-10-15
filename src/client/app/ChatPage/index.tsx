@@ -20,14 +20,6 @@ import type { GitWidgets as GitWidgetsComponent } from "../../components/chat-ui
 const GitWidgets = lazy(() =>
   import("../../components/chat-ui/widgets/GitWidgets").then((m) => ({ default: m.GitWidgets }))
 )
-// Code-split: the graph view is its own route, and React Flow is all its.
-const ChatGraphCanvas = lazy(() =>
-  import("../ChatGraph/ChatGraphCanvas").then((m) => ({ default: m.ChatGraphCanvas }))
-)
-import { buildChatGraphLocationState, readChatGraphRequestedChatId, useOpenGraphChat } from "../ChatGraph/openGraphChat"
-import type { ChatGraphHost } from "../ChatGraph/ChatGraphNode"
-import { useChatGraphRootId } from "../ChatGraph/useChatGraph"
-import { attachDelegationBlock } from "../../../shared/delegation-block"
 import { Card, CardContent } from "../../components/ui/card"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../components/ui/resizable"
 import { actionMatchesEvent, getResolvedKeybindings } from "../../lib/keybindings"
@@ -480,16 +472,8 @@ function ChatWorkspace({
   )
 }
 
-/**
- * What fills the middle of the page. `graph` (`/graph/:chatId`) is the same
- * page, navbar, composer, widget column and all, with the chat's tree of
- * sub-chats where its transcript would be (`ChatGraphCanvas`).
- */
-export type ChatPageView = "transcript" | "graph"
-
-export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
+export function ChatPage() {
   const state = useOutletContext<KannaState>()
-  const graphView = view === "graph"
   const layoutRootRef = useRef<HTMLDivElement>(null)
   // Publishes the navbar's height as `--chat-navbar-h` on its parent, for
   // what starts below it (the widget column, the viewer) and the transcript's
@@ -652,26 +636,7 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
   usePublishTicketBoard(state.chatSnapshot)
   useTicketDeepLink(state.activeChatId, state.sidebarReady, isDelegator)
   const navigate = useNavigate()
-  // The graph of a sub-chat is the graph of its top-most ancestor, so the
-  // URL is rewritten to name that chat. One tree then has one address, and
-  // the page's own chat (the composer's, the widget column's, the navbar's)
-  // is the head of the graph with nothing told apart from the route. The
-  // chat that was asked for rides along in router state, to be marked.
   const location = useLocation()
-  const graphRootId = useChatGraphRootId(graphView ? state.activeChatId : null)
-  const graphRequestedChatId = graphView
-    ? readChatGraphRequestedChatId(location.state)
-      ?? (graphRootId && graphRootId !== state.activeChatId ? state.activeChatId : null)
-    : null
-  useEffect(() => {
-    if (!graphView || !state.activeChatId || !graphRootId || graphRootId === state.activeChatId) return
-    navigate(`/graph/${graphRootId}`, { replace: true, state: buildChatGraphLocationState(state.activeChatId) })
-  }, [graphRootId, graphView, navigate, state.activeChatId])
-  // On its own page a node opens as any chat shown inside another does: in
-  // the previewer beside the graph. Except the head, which is this page's
-  // own chat, the one the composer sends to: its node goes to its transcript.
-  const openGraphChat = useOpenGraphChat()
-  const graphPageHost = useMemo<ChatGraphHost>(() => ({ openChat: openGraphChat, currentChatId: null }), [openGraphChat])
   // The navbar's left end names the open chat (`ChatNavbarTitle`), or with
   // the Chat Tabs setting on holds every chat you have open, as tabs
   // (`ChatTabs`). Either way in every sidebar view.
@@ -1073,7 +1038,7 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     // Nor on a page whose chat is still loading, where the empty state is
     // only being held over from the last page. A chat known to be new (see
     // `showEmptyState`) has the control in its composer from its first frame.
-    enabled: showEmptyState && !graphView && (!isChatLoading || isKnownNewChat) && !isDelegator,
+    enabled: showEmptyState && (!isChatLoading || isKnownNewChat) && !isDelegator,
     projectId,
     socket: state.socket,
     dialog: appDialog,
@@ -1087,19 +1052,14 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     // No scroll here: the transcript pins the new prompt to the top of the
     // viewport once it renders (see ChatTranscriptViewport's pin effect).
     //
-    // From the graph, a message asks for the work to be handed out, not done
-    // (see `attachDelegationBlock`). It is attached here, where the view is
-    // known, and from here on it is part of the message: sent, queued or
-    // steered the same.
-    //
     // From the new chat page with delegating on, the message is not for this
     // chat at all: it goes to the delegator, and the app goes with it.
     if (delegateTargetChatId) {
       await sendToDelegator(delegateTargetChatId, content, options)
       return
     }
-    await state.handleSend(graphView ? attachDelegationBlock(content) : content, options)
-  }, [delegateTargetChatId, graphView, sendToDelegator, state.handleSend])
+    await state.handleSend(content, options)
+  }, [delegateTargetChatId, sendToDelegator, state.handleSend])
 
   const handleListSkills = useCallback(
     (provider: AgentProvider) =>
@@ -1403,25 +1363,6 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
     >
       <CardContent className="flex flex-1 min-h-0 flex-col overflow-hidden p-0 relative">
         <ChatNavbarWash resetKey={state.activeChatId} opaqueBar={chatTabsEnabled} />
-        {graphView ? (
-          state.activeChatId ? (
-            <Suspense fallback={null}>
-              <ChatGraphCanvas
-                // By root, so the rewrite from a sub-chat's URL to its root's
-                // keeps the canvas it started drawing.
-                key={graphRootId ?? state.activeChatId}
-                chatId={state.activeChatId}
-                markedChatId={graphRequestedChatId}
-                // A page is wide: a generation to a column.
-                direction="columns"
-                host={graphPageHost}
-                underNavbar
-                bottomInset={transcriptPaddingBottom}
-                fitButton
-              />
-            </Suspense>
-          ) : null
-        ) : (
         <TranscriptRenderOptionsProvider value={transcriptRenderOptions}>
         <ToolPayloadProvider store={toolPayloadStore}>
         <ChatTranscriptViewport
@@ -1475,7 +1416,6 @@ export function ChatPage({ view = "transcript" }: { view?: ChatPageView }) {
         />
         </ToolPayloadProvider>
         </TranscriptRenderOptionsProvider>
-        )}
       </CardContent>
 
       <ChatInputDock

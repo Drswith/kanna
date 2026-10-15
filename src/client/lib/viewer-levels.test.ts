@@ -23,13 +23,6 @@ describe("viewerLevelBelow on an ordinary chat", () => {
       .toEqual({ item: { kind: "chat", chatId: "a" } })
   })
 
-  test("the first chat picked from the graph goes back to the graph, and keeps it through its trail", () => {
-    expect(viewerLevelBelow({ item: { kind: "chat", chatId: "a", graph: "root" } }, null))
-      .toEqual({ item: { kind: "graph", chatId: "root" } })
-    expect(viewerLevelBelow({ item: { kind: "chat", chatId: "b", back: ["a"], graph: "root" } }, null))
-      .toEqual({ item: { kind: "chat", chatId: "a", graph: "root" } })
-  })
-
   test("a chat picked from a delegator's list goes back to the list where there is no floor (a phone)", () => {
     expect(viewerLevelBelow({ item: { kind: "chat", chatId: "a", delegated: "deleg" } }, null)).toEqual({ item: LIST })
     expect(viewerLevelBelow({ item: LIST }, null)).toBe("closed")
@@ -44,7 +37,6 @@ describe("viewerLevelBelow on a delegator, whose pane has a floor", () => {
 
   test("anything opened from the transcript goes back to the list", () => {
     expect(viewerLevelBelow({ item: { kind: "chat", chatId: "a" }, widthPx: 500 }, LIST)).toEqual({ item: LIST, widthPx: 500 })
-    expect(viewerLevelBelow({ item: { kind: "graph", chatId: "deleg" } }, LIST)).toEqual({ item: LIST })
     // The pane's width is the pane's: a file leaves it as it found it.
     expect(viewerLevelBelow({ item: FILE, widthPx: 500 }, LIST)).toEqual({ item: LIST, widthPx: 500 })
   })

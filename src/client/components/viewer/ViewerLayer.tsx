@@ -20,10 +20,9 @@ const FileViewer = lazy(() => import("./FileViewer").then((m) => ({ default: m.F
 // Its parts are the chat page's own, already loaded there. Lazy all the same:
 // the export viewer mounts this layer too, and never shows a chat.
 const ChatPreview = lazy(() => import("../../app/ChatPage/ChatPreview").then((m) => ({ default: m.ChatPreview })))
-// React Flow comes with it, and only a page that can preview a chat shows one.
+// Only a page that can preview a chat shows one.
 const DelegatedList = lazy(() => import("../../app/ChatPage/DelegatedList").then((m) => ({ default: m.DelegatedList })))
 const TicketView = lazy(() => import("../../app/ChatPage/TicketView").then((m) => ({ default: m.TicketView })))
-const GraphViewer = lazy(() => import("../../app/ChatGraph/GraphViewer").then((m) => ({ default: m.GraphViewer })))
 
 /**
  * Whether the viewer has something to show on a page that knows this project
@@ -82,7 +81,7 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
   const backKind = hasBack ? below.item.kind : null
   const floorState = useMemo<ViewerFloorState | null>(() => (floor ? {
     onBack: hasBack ? stepBack : null,
-    backLabel: backKind === "chat" ? "Back to chat" : backKind === "graph" ? "Back to graph" : backKind === "ticket" ? "Back to ticket" : "Back to the board",
+    backLabel: backKind === "chat" ? "Back to chat" : backKind === "ticket" ? "Back to ticket" : "Back to tickets",
     onShut: shut,
   } : null), [backKind, floor, hasBack, shut, stepBack])
   useEffect(() => (canShowChat ? useViewerStore.getState().registerChatPreviewHost() : undefined), [canShowChat])
@@ -157,10 +156,6 @@ export function ViewerLayer({ diff, chat, className, onOpenLocalLink, placement,
             <ChartFullView payload={item.payload} onClose={close} />
           ) : item.kind === "visualization" ? (
             <VisualizationFullView key={item.artifact.url} artifact={item.artifact} onClose={close} />
-          ) : (item.kind === "graph" || (item.kind === "chat" && item.graph)) && chat ? (
-            // The graph, and a chat picked from it: one view for both, so the
-            // graph stays where it was under the chat and Back finds it there.
-            <GraphViewer item={item} context={chat} onClose={close} />
           ) : item.kind === "chat" && chat ? (
             <ChatPreview item={item} context={chat} onClose={close} />
           ) : item.kind === "delegated" ? (

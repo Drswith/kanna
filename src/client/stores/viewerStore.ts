@@ -41,19 +41,12 @@ export type ViewerItem =
    * page is on refers to (see `lib/chat-open`). `back` is the chats that lead back from
    * it, oldest first, when it was reached by a click inside the previewer.
    *
-   * `graph` is set on a chat opened from the graph (below): the chat the
-   * graph was opened for. It is the start of that chat's trail, so Back from
-   * it, or from the first chat on `back`, returns to the graph. `delegated`
-   * is the same for a chat picked from a delegator's list: the delegator.
-   * `ticket` goes with it for a chat opened from one of that delegator's
+   * `delegated` is set on a chat picked from a delegator's board: the
+   * delegator. It is the start of that chat's trail, so Back from it, or
+   * from the first chat on `back`, returns to the board. `ticket` goes with it for a chat opened from one of that delegator's
    * tickets, so the trail ends at the ticket and then at the board.
    */
-  | { kind: "chat"; chatId: string; back?: string[]; graph?: string; delegated?: string; ticket?: string }
-  /**
-   * The tree of sub-chats `chatId` is in, drawn from its root (see
-   * `app/ChatGraph`). Selecting a chat in it puts that chat in its place.
-   */
-  | { kind: "graph"; chatId: string }
+  | { kind: "chat"; chatId: string; back?: string[]; delegated?: string; ticket?: string }
   /**
    * The chats under the delegator `chatId`, as a list to pick from. On a
    * delegator's page this is the pane's floor (see `lib/viewer-levels`):
@@ -81,13 +74,13 @@ export function viewerWidthClass(item: ViewerItem): ViewerWidthClass {
 }
 
 /**
- * A chat, or what chats are picked from (the graph, a delegator's list): the
- * previewer's own subject, as against a file or image opened over it. They
- * share a width, so the pane holds still while a graph or a list turns into
- * the chat picked from it.
+ * A chat, or what chats are picked from (a delegator's board, one of its
+ * tickets): the previewer's own subject, as against a file or image opened
+ * over it. They share a width, so the pane holds still while the board
+ * turns into the chat picked from it.
  */
-export function isChatTrailItem(item: ViewerItem): item is Extract<ViewerItem, { kind: "chat" | "graph" | "delegated" | "ticket" }> {
-  return item.kind === "chat" || item.kind === "graph" || item.kind === "delegated" || item.kind === "ticket"
+export function isChatTrailItem(item: ViewerItem): item is Extract<ViewerItem, { kind: "chat" | "delegated" | "ticket" }> {
+  return item.kind === "chat" || item.kind === "delegated" || item.kind === "ticket"
 }
 
 /** The pane's floor on a delegator's page: that delegator's list. */

@@ -33,7 +33,7 @@ export interface DelegatedSendOptions {
  * there. Nothing of the page's chat is used but its project.
  */
 export function useNewChatDelegate({ enabled, projectId, socket, dialog }: {
-  /** The page is a new chat's: empty, and not the graph's. */
+  /** The page is a new chat's: empty. */
   enabled: boolean
   projectId: string | null
   socket: KannaSocket

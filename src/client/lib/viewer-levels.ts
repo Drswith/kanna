@@ -6,7 +6,7 @@ import type { ViewerItem } from "../stores/viewerStore"
  * The pane holds one thing at a time, but things are opened from other
  * things, and each remembers where it came from: a file opened over a chat
  * (`returnTo`), a chat stepped to from another (`back`), a chat picked from
- * the graph (`graph`) or from a delegator's list (`delegated`). Read together
+ * a delegator's board or one of its tickets (`delegated`, `ticket`). Read together
  * those are a stack, and this is its one reading.
  *
  * Under all of it, on a delegator's page, is the pane's floor: the list of
@@ -37,7 +37,7 @@ function sameItem(left: ViewerItem, right: ViewerItem) {
 
 export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): ViewerLevelBelow {
   const { item } = level
-  // Something opened over a chat, the graph or the list goes back to it, at
+  // Something opened over a chat, the board or a ticket goes back to it, at
   // the width it had.
   if (level.returnTo) return { ...level.returnTo }
 
@@ -45,7 +45,6 @@ export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): 
   const kept = level.widthPx !== undefined ? { widthPx: level.widthPx } : {}
   if (item.kind === "chat") {
     const origin = {
-      ...(item.graph ? { graph: item.graph } : {}),
       ...(item.delegated ? { delegated: item.delegated } : {}),
       ...(item.ticket ? { ticket: item.ticket } : {}),
     }
@@ -54,9 +53,7 @@ export function viewerLevelBelow(level: ViewerLevel, floor: ViewerItem | null): 
       const back = item.back!.slice(0, -1)
       return { item: { kind: "chat", chatId: previous, ...(back.length > 0 ? { back } : {}), ...origin }, ...kept }
     }
-    // The first chat of a trail goes back to what it was picked from: the
-    // graph, which was itself opened over the list if there is one.
-    if (item.graph) return { item: { kind: "graph", chatId: item.graph }, ...kept }
+    // The first chat of a trail goes back to what it was picked from.
     if (item.delegated && item.ticket) return { item: { kind: "ticket", chatId: item.delegated, ticketId: item.ticket }, ...kept }
     if (item.delegated) return { item: { kind: "delegated", chatId: item.delegated }, ...kept }
   }

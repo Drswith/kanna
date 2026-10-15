@@ -31,7 +31,6 @@ import type {
 } from "../shared/types"
 import { normalizeToolCall } from "../shared/tools"
 import type { ClientCommand } from "../shared/protocol"
-import { stripDelegationBlock } from "../shared/delegation-block"
 import { AsyncQueue } from "./async-queue"
 import { resolveClaudeExecutable } from "./claude-executable"
 import { KannaToolRuntime, KannaToolEventFilter, type KannaToolHost } from "./kanna-tools"
@@ -2428,10 +2427,6 @@ export class AgentCoordinator {
     }
 
     const chat = this.store.requireChat(chatId)
-    // A delegator is told to delegate in its session instructions. The block
-    // the graph page adds to a message says the same, narrower, so it is
-    // dropped here and the turn carries one or the other, never both.
-    if (chat.delegator) command = { ...command, content: stripDelegationBlock(command.content) }
     // Sending a message to an archived chat resurrects it (viewing alone
     // never unarchives).
     if (chat.archivedAt) {
@@ -2481,9 +2476,7 @@ export class AgentCoordinator {
     extras?: { source?: MessageSource; effort?: string },
   ) {
     if (!extras?.source) this.analytics.track("message_sent")
-    // As in `send`: a delegator's turn does not also carry the graph page's block.
-    const content = this.store.getChat(command.chatId)?.delegator ? stripDelegationBlock(command.content) : command.content
-    const queuedMessage = await this.enqueueMessage(command.chatId, content, command.attachments ?? [], {
+    const queuedMessage = await this.enqueueMessage(command.chatId, command.content, command.attachments ?? [], {
       provider: command.provider,
       model: command.model,
       modelOptions: command.modelOptions,

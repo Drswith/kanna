@@ -16,7 +16,6 @@ import { timestamped } from "./transcript"
 import { splitTranscriptEntry } from "./transcript-payloads"
 import type { TranscriptEntry } from "../shared/types"
 import { stripSystemMessages } from "../shared/message-preview"
-import { attachDelegationBlock, DELEGATION_BLOCK } from "../shared/delegation-block"
 
 /**
  * These run the real coordinator and the real store against a provider whose
@@ -1838,26 +1837,6 @@ describe("delegators", () => {
     expect(store.getChat(second)).toMatchObject({ parentChatId: first, adopted: true, delegator: true })
     await expect(orchestrator.sendMessage(second, { chatId: first, message: "nothing" })).rejects.toThrow("would make a loop")
     expect(store.getChat(first)).not.toHaveProperty("parentChatId")
-  })
-
-  test("a delegator's turn does not also carry the graph page's block", async () => {
-    const context = await setup()
-    const { agent, codex, store, userChat, prompts } = context
-    const root = await delegatorChat(context, attachDelegationBlock("ship the release"))
-    expect(prompts(root)[0]).toMatchObject({ content: "ship the release" })
-    expect(codex.turn(root).content).not.toContain(DELEGATION_BLOCK)
-    expect(codex.turn(root).delegator).toBe(true)
-
-    // Queued behind the turn, by either command.
-    await agent.send({ type: "chat.send", chatId: root, provider: "codex", content: attachDelegationBlock("and the docs") })
-    await agent.enqueue({ type: "message.enqueue", chatId: root, content: attachDelegationBlock("and the changelog") })
-    expect(store.getQueuedMessages(root).map((message) => message.content)).toEqual(["and the docs", "and the changelog"])
-
-    // Any other chat keeps the block: it is the only thing telling it to delegate.
-    const other = await userChat(attachDelegationBlock("something else"))
-    expect(prompts(other)[0]!.kind === "user_prompt" && prompts(other)[0]!.content).toContain(DELEGATION_BLOCK)
-    expect(codex.turn(other).content).toContain(DELEGATION_BLOCK)
-    expect(codex.turn(other).delegator).toBe(false)
   })
 
   test("stopping a delegator stops the sub-chats it started and leaves the ones it adopted", async () => {

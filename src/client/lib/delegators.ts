@@ -58,7 +58,7 @@ export function resolveDelegateTarget(
  * and reporting on. A chat one of those started for itself reports to that
  * chat, which answers for it; listing it here would put work in front of the
  * user that the delegator never mentions. It is one step away, in its
- * parent's Tasks and in the graph.
+ * parent's Tasks.
  */
 export function delegatedThreads(threads: readonly SidebarThread[], delegatorChatId: string): SidebarThread[] {
   return threads.filter((thread) => thread.row.parentChatId === delegatorChatId)
