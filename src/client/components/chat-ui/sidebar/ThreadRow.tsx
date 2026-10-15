@@ -36,6 +36,8 @@ interface ThreadRowProps {
   dimIdleTitles?: boolean
   /** See `ThreadRowContent`. */
   showProjectIcon?: boolean
+  /** See `ThreadRowContent`. */
+  delegatorMark?: boolean
   onSelect: (chatId: string) => void
   onCreateChat: (projectId: string) => void
   onRenameChat: (chat: SidebarThread["row"]) => void
@@ -52,7 +54,7 @@ interface ThreadRowProps {
 type ThreadRowBodyProps = Pick<
   ThreadRowProps,
   | "thread" | "isActive" | "archived" | "detailScope" | "nowMs" | "detailLabelOverride"
-  | "dimIdleTitles" | "showProjectIcon" | "onSelect" | "onForkChat" | "onArchiveChat" | "onRestoreChat"
+  | "dimIdleTitles" | "showProjectIcon" | "delegatorMark" | "onSelect" | "onForkChat" | "onArchiveChat" | "onRestoreChat"
 > & Omit<HTMLAttributes<HTMLDivElement>, "onSelect"> & { ref?: Ref<HTMLDivElement> }
 
 /**
@@ -76,6 +78,7 @@ export function ThreadRowBody({
   detailLabelOverride,
   dimIdleTitles = true,
   showProjectIcon = false,
+  delegatorMark,
   onSelect,
   onForkChat,
   onArchiveChat,
@@ -164,6 +167,7 @@ export function ThreadRowBody({
         dimIdleTitles={dimIdleTitles}
         hasDraft={hasDraft}
         showProjectIcon={showProjectIcon}
+        delegatorMark={delegatorMark}
         detailLabel={detailLabel}
         hoverActions={hoverActions}
       />
@@ -198,6 +202,7 @@ function ThreadRowImpl({
   detailLabelOverride,
   dimIdleTitles = true,
   showProjectIcon = false,
+  delegatorMark,
   onSelect,
   onCreateChat,
   onRenameChat,
@@ -235,6 +240,7 @@ function ThreadRowImpl({
         detailLabelOverride={detailLabelOverride}
         dimIdleTitles={dimIdleTitles}
         showProjectIcon={showProjectIcon}
+        delegatorMark={delegatorMark}
         onSelect={onSelect}
         onForkChat={onForkChat}
         onArchiveChat={onArchiveChat}

@@ -91,7 +91,22 @@ export function delegatedAttentionCount(
   return count
 }
 
+/** A delegator that has not been named: the server calls every chat "New Chat" until its first message does. */
+export function isUnnamedDelegator(title: string): boolean {
+  return title.trim() === "" || title === "New Chat"
+}
+
 /** What a new, still unnamed delegator is called in the control: the server's "New Chat" would read as no delegator at all. */
 export function delegatorDisplayTitle(title: string): string {
-  return title.trim() === "" || title === "New Chat" ? "New delegator" : title
+  return isUnnamedDelegator(title) ? "New delegator" : title
+}
+
+/**
+ * What heads a delegator's list of chats: its name, which is the whole
+ * header. An unnamed one is "Delegator", as on iOS: "New Chat" over a list
+ * of chats would read as the list's own name. Also for a list whose
+ * delegator the sidebar cannot name yet.
+ */
+export function delegatedListTitle(title: string | undefined): string {
+  return title === undefined || isUnnamedDelegator(title) ? "Delegator" : title
 }
