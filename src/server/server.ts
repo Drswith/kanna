@@ -21,7 +21,7 @@ import { createPairSessionManager, type PairSessionSnapshot } from "./cloud/pair
 import { EventStore } from "./event-store"
 import { AgentCoordinator } from "./agent"
 import { CodexAppServerManager } from "./codex-app-server"
-import { KannaAnalyticsReporter } from "./analytics"
+import { isAnalyticsDisabledByEnv, KannaAnalyticsReporter, NoopAnalyticsReporter } from "./analytics"
 import { AppSettingsManager } from "./app-settings"
 import { refreshInstalledEditors } from "./editor-detection"
 import { refreshInstalledTerminals } from "./terminal-detection"
@@ -248,11 +248,13 @@ export async function startKannaServer(options: StartKannaServerOptions = {}) {
   void refreshInstalledEditors(appSettings)
   void refreshInstalledTerminals(appSettings)
   await keybindings.initialize()
-  const analytics = new KannaAnalyticsReporter({
-    settings: appSettings,
-    currentVersion: options.update?.version ?? "unknown",
-    environment: runtimeProfile === "dev" ? "dev" : "prod",
-  })
+  const analytics = isAnalyticsDisabledByEnv()
+    ? NoopAnalyticsReporter
+    : new KannaAnalyticsReporter({
+      settings: appSettings,
+      currentVersion: options.update?.version ?? "unknown",
+      environment: runtimeProfile === "dev" ? "dev" : "prod",
+    })
   const updateManager = options.update
     ? new UpdateManager({
       currentVersion: options.update.version,

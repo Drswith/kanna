@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { KannaAnalyticsReporter, getLaunchAnalyticsProperties } from "./analytics"
+import { KannaAnalyticsReporter, getLaunchAnalyticsProperties, isAnalyticsDisabledByEnv } from "./analytics"
 
 const originalLogAnalytics = process.env.KANNA_LOG_ANALYTICS
 
@@ -43,6 +43,22 @@ describe("getLaunchAnalyticsProperties", () => {
       strictPort: false,
       cloud: true,
     }).cloud_enabled).toBe(true)
+  })
+})
+
+describe("isAnalyticsDisabledByEnv", () => {
+  test("test runs, CI and explicit opt-outs disable analytics", () => {
+    expect(isAnalyticsDisabledByEnv({ NODE_ENV: "test" })).toBe(true)
+    expect(isAnalyticsDisabledByEnv({ CI: "true" })).toBe(true)
+    expect(isAnalyticsDisabledByEnv({ CI: "1" })).toBe(true)
+    expect(isAnalyticsDisabledByEnv({ KANNA_DISABLE_ANALYTICS: "1" })).toBe(true)
+    expect(isAnalyticsDisabledByEnv({ DO_NOT_TRACK: "1" })).toBe(true)
+  })
+
+  test("a normal launch keeps analytics, as do falsy flag values", () => {
+    expect(isAnalyticsDisabledByEnv({})).toBe(false)
+    expect(isAnalyticsDisabledByEnv({ NODE_ENV: "production" })).toBe(false)
+    expect(isAnalyticsDisabledByEnv({ CI: "false", DO_NOT_TRACK: "0", KANNA_DISABLE_ANALYTICS: "" })).toBe(false)
   })
 })
 
