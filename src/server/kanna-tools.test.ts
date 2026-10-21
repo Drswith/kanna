@@ -195,7 +195,7 @@ describe("shared Kanna display tools", () => {
     expect(validate("read_chat", { chatId: "c", after: -1, textOffset: 50000, lastTurns: 1, kinds: ["reply", "tool_result"], limit: 5 }))
       .toEqual({ chatId: "c", after: -1, textOffset: 50000, lastTurns: 1, kinds: ["reply", "tool_result"], limit: 5 })
     expect(() => validate("read_chat", { chatId: "c", kinds: ["assistant"] })).toThrow("Validation failed")
-    expect(validate("create_chat", { message: "go" })).toEqual({ message: "go" })
+    expect(validate("create_chat", { message: "go", title: "Lexer fix" })).toEqual({ message: "go", title: "Lexer fix" })
     expect(() => validate("create_chat", {})).toThrow("Validation failed")
     // Without a server behind the runtime the tools say so instead of failing oddly.
     expect(await runtime.execute("list_chats", {})).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("not available") }] })
@@ -204,6 +204,31 @@ describe("shared Kanna display tools", () => {
     const names = kannaToolSpecs().map((spec) => spec.name)
     expect(names.some((name) => /ticket|checkpoint/.test(name))).toBe(false)
     expect(JSON.stringify(kannaToolSpecs())).not.toMatch(/ticket|checkpoint/i)
+  })
+
+  test("every chat tool requires a title, and leans to a fork for new work", async () => {
+    const spec = (name: string) => kannaToolSpecs().find((tool) => tool.name === name)!
+    const schemaOf = (name: string) => spec(name).inputSchema as unknown as { required?: string[]; properties: { title: { description: string } } }
+    for (const name of ["create_chat", "fork_chat", "send_message"]) expect(schemaOf(name).required).toContain("title")
+    expect(spec("fork_chat").description).toContain("The default way to take on new work that needs an existing chat's context")
+    expect(schemaOf("fork_chat").properties.title.description).toContain("not the original's")
+    expect(spec("send_message").description).toContain("prefer that to reusing the chat under a new title")
+    const sendTitle = schemaOf("send_message").properties.title.description
+    expect(sendTitle).toContain("pass its current title to keep it")
+    expect(sendTitle).toContain("the title must change to that work, but prefer fork_chat")
+    expect(sendTitle).toContain("titleChanged")
+    // Only its own sub-chats are renamed by a message.
+    expect(sendTitle).toContain("adopt")
+
+    // Refused, with a line that says what to pass, before anything runs.
+    const { runtime } = setup()
+    try {
+      const missing = await runtime.execute("send_message", { chatId: "other", message: "and the tests" })
+      expect(missing).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("send_message needs a title") }] })
+      const blank = await runtime.execute("fork_chat", { title: "  " })
+      expect(blank).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("fork_chat needs a title") }] })
+      expect((await runtime.execute("create_chat", { message: "go" })).content[0]!.text).toContain("create_chat needs a title")
+    } finally { runtime.abort() }
   })
 
   test("every tool description fits in what Claude Code shows of one (2,048 characters)", () => {

@@ -907,6 +907,7 @@ export class ChatOrchestrator {
 
   async createChat(actorChatId: string, input: RunOptions & {
     message: string
+    /** The work it does. Required by the tool; the user's own creations may have none. */
     title?: string
     projectId?: string
     subchat?: boolean
@@ -940,6 +941,7 @@ export class ChatOrchestrator {
   async forkChat(actorChatId: string, input: RunOptions & {
     chatId?: string
     message?: string
+    /** The new work's. A fork is how a chat's context is reused for new work, so the tool requires one. */
     title?: string
     subchat?: boolean
   }) {
@@ -954,7 +956,7 @@ export class ChatOrchestrator {
       ...(subchat ? { parentChatId: actorChatId } : {}),
     })
     const chat = this.requireChat(forked.result.chatId)
-    if (input.title?.trim()) await this.commands.rename(chat.id, input.title)
+    if (input.title?.trim()) await this.commands.rename(chat.id, input.title.trim())
     if (input.message) {
       const run = this.resolveRun(actorChatId, input, {
         provider: chat.provider,
@@ -971,6 +973,13 @@ export class ChatOrchestrator {
   async sendMessage(actorChatId: string, input: RunOptions & {
     chatId: string
     message: string
+    /**
+     * What the chat works on: its title unchanged for a follow-up on its own
+     * work, a new one when it is reused for new work. The tool requires it,
+     * so keeping it is a choice; none keeps it too. Applied to this chat's
+     * own sub-chats only; see below.
+     */
+    title?: string
     delivery?: "queue" | "steer"
     adopt?: boolean
   }) {
@@ -988,6 +997,18 @@ export class ChatOrchestrator {
     // report it earns is addressed by the link.
     const delegating = Boolean(this.requireChat(actorChatId).delegator)
     const adoption = input.adopt || delegating ? await this.adopt(actorChatId, target, { forced: delegating && !input.adopt }) : null
+    // Named for the work it is given, before the message lands, so the
+    // sidebar says what it is doing from the start. Only a chat of this
+    // one's: one it started, or adopts here. A message to anyone else's chat,
+    // the user's own among them, leaves its name alone. One adopted is
+    // renamed even while the user has it open: the server cannot tell.
+    const title = input.title?.trim() || target.title
+    const ownChat = this.requireChat(target.id).parentChatId === actorChatId
+    const previousTitle = ownChat && title !== target.title ? target.title : null
+    if (previousTitle !== null) {
+      await this.commands.rename(target.id, title)
+      this.push({ sidebar: true, chatIds: [target.id] })
+    }
     let sent: { queuedMessageId?: string }
     try {
       sent = await this.send(actorChatId, target, input.message, run, {
@@ -997,6 +1018,7 @@ export class ChatOrchestrator {
       })
     } catch (error) {
       // The caller is told the send failed, so nothing of it may remain.
+      if (previousTitle !== null) await this.commands.rename(target.id, previousTitle).catch(() => {})
       await adoption?.undo().catch(() => {})
       throw error
     }
@@ -1016,6 +1038,9 @@ export class ChatOrchestrator {
       ...this.summarize(this.requireChat(target.id)),
       started: sent.queuedMessageId === undefined,
       ...(sent.queuedMessageId === undefined ? {} : { queuedMessageId: sent.queuedMessageId }),
+      // What it did with the title, so the agent sees whether it kept or changed it.
+      titleChanged: previousTitle !== null,
+      ...(!ownChat && title !== target.title ? { note: "Not renamed: it is not a sub-chat of this chat. Pass adopt: true to hand it work as yours, and title it." } : {}),
     }
   }
 

@@ -682,6 +682,55 @@ describe("messages between chats", () => {
     expect(store.getChat(other)?.reportOwed).toBeUndefined()
   })
 
+  test("a title renames the chat for its new work before the message goes, and the sidebar hears of it", async () => {
+    const { orchestrator, codex, store, pushes, userChat, prompts } = await setup()
+    const root = await userChat()
+    const child = await orchestrator.createChat(root, { message: "audit the parser", title: "Parser audit" })
+    expect(store.getChat(child.chatId)?.title).toBe("Parser audit")
+    codex.finish(child.chatId, "Audited.")
+    await until(() => orchestrator.readChat({ chatId: child.chatId }).chat.status === "completed")
+
+    pushes.length = 0
+    const sent = await orchestrator.sendMessage(root, { chatId: child.chatId, message: "now fix the lexer", title: "Lexer fix" })
+    expect(sent).toMatchObject({ title: "Lexer fix", titleChanged: true })
+    expect(store.getChat(child.chatId)?.title).toBe("Lexer fix")
+    // Pushed on its own, ahead of the send's.
+    expect(pushes[0]).toEqual({ sidebar: true, chatIds: [child.chatId] })
+    await until(() => prompts(child.chatId).length === 2, "the message")
+    // A follow-up passes the title it has: kept, and the result says so.
+    pushes.length = 0
+    const kept = await orchestrator.sendMessage(root, { chatId: child.chatId, message: "and the tests", title: "Lexer fix" })
+    expect(kept).toMatchObject({ title: "Lexer fix", titleChanged: false })
+    // The send's own push only: no rename went ahead of it.
+    expect(pushes.filter((push) => JSON.stringify(push) === JSON.stringify({ sidebar: true, chatIds: [child.chatId] }))).toHaveLength(1)
+  })
+
+  test("fork_chat names the fork for its new work, and leaves the original as it was", async () => {
+    const { orchestrator, codex, store, userChat } = await setup()
+    const root = await userChat()
+    const source = await orchestrator.createChat(root, { message: "audit the parser", title: "Parser audit" })
+    codex.turn(source.chatId).events.push({ type: "session_token", sessionToken: "thread-1" })
+    codex.finish(source.chatId, "Audited.")
+    await until(() => orchestrator.readChat({ chatId: source.chatId }).chat.status === "completed")
+    const fork = await orchestrator.forkChat(root, { chatId: source.chatId, title: "Lexer fix" })
+    expect(fork).toMatchObject({ title: "Lexer fix", forkedFromChatId: source.chatId })
+    expect(store.getChat(source.chatId)?.title).toBe("Parser audit")
+  })
+
+  test("a title renames only a sub-chat of the sender: one it adopts here, never the user's chat it merely messages", async () => {
+    const { orchestrator, store, userChat } = await setup()
+    const root = await userChat()
+    const other = await userChat("something else")
+    const before = store.getChat(other)?.title
+    const plain = await orchestrator.sendMessage(root, { chatId: other, message: "rebase when done", title: "Rebase" })
+    expect(store.getChat(other)?.title).toBe(before)
+    expect(plain.note).toContain("Not renamed")
+
+    const adopted = await orchestrator.sendMessage(root, { chatId: other, message: "and push", title: "Rebase and push", adopt: true })
+    expect(store.getChat(other)?.title).toBe("Rebase and push")
+    expect(adopted).not.toHaveProperty("note")
+  })
+
   test("steer delivery interrupts the turn in progress", async () => {
     const { orchestrator, codex, userChat } = await setup()
     const root = await userChat()
@@ -1773,8 +1822,9 @@ describe("delegators", () => {
     codex.turn(source).events.push({ type: "session_token", sessionToken: "thread-1" })
     codex.finish(source, "done")
     await until(() => orchestrator.readChat({ chatId: source }).chat.status === "completed")
-    const fork = await orchestrator.forkChat(root, { chatId: source, subchat: false })
-    expect(fork).toMatchObject({ parentChatId: root, forkedFromChatId: source })
+    const fork = await orchestrator.forkChat(root, { chatId: source, subchat: false, title: "Parser audit, forked" })
+    expect(fork).toMatchObject({ parentChatId: root, forkedFromChatId: source, title: "Parser audit, forked" })
+    expect(store.getChat(fork.chatId)?.title).toBe("Parser audit, forked")
 
     // An ordinary chat still chooses.
     const independent = await orchestrator.createChat(source, { message: "separate work", subchat: false })
@@ -2155,7 +2205,7 @@ describe("adopting", () => {
     expect(refused.isError).toBe(true)
     expect(store.getChat(other)).not.toHaveProperty("parentChatId")
 
-    const sent = await runtime.execute("send_message", { chatId: other, message: "rebase", adopt: true })
+    const sent = await runtime.execute("send_message", { chatId: other, message: "rebase", adopt: true, title: store.getChat(other)!.title })
     expect(JSON.parse(sent.content[0]!.text)).toMatchObject({ chatId: other, parentChatId: root, adopted: true })
     expect(store.getChat(other)).toMatchObject({ parentChatId: root, adopted: true, reportOwed: true })
   })
