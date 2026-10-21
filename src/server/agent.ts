@@ -182,6 +182,8 @@ interface ActiveTurn {
   provider: AgentProvider
   turn: HarnessTurn
   claudePromptSeq?: number
+  /** The Claude session this turn runs in (`ClaudeSessionState.id`). See `runClaudeSession`'s cleanup. */
+  claudeSessionId?: string
   model: string
   effort?: string
   serviceTier?: "fast"
@@ -2282,6 +2284,7 @@ export class AgentCoordinator {
       session.nextPromptSeq = promptSeq
       session.pendingPrompts.push({ seq: promptSeq, id: promptId })
       active.claudePromptSeq = promptSeq
+      active.claudeSessionId = session.id
       logClaudeSteer("claude_prompt_sent", {
         chatId: args.chatId,
         sessionId: session.id,
@@ -2797,6 +2800,7 @@ export class AgentCoordinator {
         interrupt: session.session.interrupt,
         close: () => {},
       },
+      claudeSessionId: session.id,
       model: session.model,
       effort: session.effort,
       planMode: session.planMode,
@@ -2944,8 +2948,13 @@ export class AgentCoordinator {
       if (this.claudeSessions.get(session.chatId) === session) {
         this.claudeSessions.delete(session.chatId)
       }
+      // Only this session's turn. A restart registers the replacement's turn
+      // before the old stream ends (the CLI takes a while to exit), and
+      // dropping that one left the chat with no turn to finish: its first
+      // reply re-registered it as a background turn, the prompt's result
+      // could not close that, and the chat read "running" until stopped.
       const active = this.activeTurns.get(session.chatId)
-      if (active?.provider === "claude") {
+      if (active?.provider === "claude" && active.claudeSessionId === session.id) {
         active.customTools?.abort()
         if (active.cancelRequested && !active.cancelRecorded) {
           await this.store.recordTurnCancelled(session.chatId)
