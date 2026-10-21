@@ -9,6 +9,8 @@ import { createChatCommands } from "./chat-commands"
 import { EventStore } from "./event-store"
 import type { HarnessEvent, HarnessTurn } from "./harness-types"
 import { KannaToolRuntime } from "./kanna-tools"
+import { buildKannaSystemInstructions } from "./harness-instructions"
+import { buildKannaAgentId } from "./attribution"
 import { ChatOrchestrator, MAX_CHAT_DEPTH, MAX_LIVE_CHATS } from "./orchestrator"
 import type { ChatChange } from "./chat-commands"
 import { deriveChatSnapshot, deriveSidebarData } from "./read-models"
@@ -28,6 +30,7 @@ interface FakeTurn {
   content: string
   planMode: boolean
   delegator?: boolean
+  model?: string
   skipPlanApproval?: boolean
   events: AsyncQueue<HarnessEvent>
   open: boolean
@@ -41,8 +44,8 @@ class FakeCodex {
   stopAll() {}
   getResourceCounts() { return {} }
 
-  async startTurn(args: { chatId: string; content: string; planMode: boolean; delegator?: boolean; skipPlanApproval?: boolean }): Promise<HarnessTurn> {
-    const turn: FakeTurn = { chatId: args.chatId, content: args.content, planMode: args.planMode, delegator: args.delegator, skipPlanApproval: args.skipPlanApproval, events: new AsyncQueue(), open: true }
+  async startTurn(args: { chatId: string; content: string; model?: string; planMode: boolean; delegator?: boolean; skipPlanApproval?: boolean }): Promise<HarnessTurn> {
+    const turn: FakeTurn = { chatId: args.chatId, content: args.content, model: args.model, planMode: args.planMode, delegator: args.delegator, skipPlanApproval: args.skipPlanApproval, events: new AsyncQueue(), open: true }
     this.turns.push(turn)
     const end = () => {
       turn.open = false
@@ -1834,6 +1837,25 @@ describe("delegators", () => {
     codex.finish(child.chatId, "Found two bugs.")
     await until(() => store.getQueuedMessages(root).length === 1, "the report")
     expect(store.getQueuedMessages(root)[0]).toMatchObject({ source: { kind: "report", chatIds: [child.chatId] } })
+  })
+
+  test("a delegator's fork is a delegator, under the same system prompt and model, so it reads the source's cache", async () => {
+    const context = await setup()
+    const { orchestrator, codex, store } = context
+    const root = await delegatorChat(context)
+    codex.turn(root).events.push({ type: "session_token", sessionToken: "thread-root" })
+    codex.finish(root, "Handed off.")
+    await until(() => orchestrator.readChat({ chatId: root }).chat.status === "completed")
+
+    const fork = await orchestrator.forkChat(root, { chatId: root, title: "Release notes", message: "draft the release notes" })
+    expect(store.getChat(fork.chatId)?.delegator).toBe(true)
+    await until(() => codex.turnsFor(fork.chatId).length === 1, "the fork's turn")
+    const [source] = codex.turnsFor(root)
+    const [forked] = codex.turnsFor(fork.chatId)
+    expect(forked!.delegator).toBe(true)
+    expect(forked!.model).toBe(source!.model)
+    const instructions = (turn: typeof source) => buildKannaSystemInstructions(buildKannaAgentId("codex", turn!.model!), { delegator: turn!.delegator })
+    expect(instructions(forked)).toBe(instructions(source))
   })
 
   test("every chat a delegator messages is adopted, with no flag", async () => {

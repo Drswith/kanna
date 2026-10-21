@@ -2234,12 +2234,14 @@ describe("AgentCoordinator claude integration", () => {
     events.close()
   })
 
-  test("uses Claude forkSession when starting a forked chat", async () => {
-    const startSessionCalls: Array<{ sessionToken: string | null; forkSession: boolean }> = []
+  test("uses Claude forkSession when starting a forked chat, cut at the branch point", async () => {
+    const startSessionCalls: Array<{ sessionToken: string | null; forkSession: boolean; resumeSessionAt?: string }> = []
     const events = new AsyncEventQueue<any>()
     const store = createFakeStore()
     store.chat.provider = "claude"
     store.chat.pendingForkSessionToken = "claude-parent-1"
+    // The source's last message when the fork was made; it has run on since.
+    store.chat.pendingForkAt = "uuid-at-fork"
 
     const coordinator = new AgentCoordinator({
       store: store as never,
@@ -2248,6 +2250,7 @@ describe("AgentCoordinator claude integration", () => {
         startSessionCalls.push({
           sessionToken: args.sessionToken,
           forkSession: args.forkSession,
+          ...(args.resumeSessionAt ? { resumeSessionAt: args.resumeSessionAt } : {}),
         })
 
         return {
@@ -2300,8 +2303,10 @@ describe("AgentCoordinator claude integration", () => {
     expect(startSessionCalls).toEqual([{
       sessionToken: "claude-parent-1",
       forkSession: true,
+      resumeSessionAt: "uuid-at-fork",
     }])
     expect(store.chat.pendingForkSessionToken).toBeNull()
+    expect(store.chat.pendingForkAt).toBeNull()
     events.close()
   })
 })
@@ -2944,6 +2949,7 @@ function createFakeChat(id: string, projectId: string, title = "New Chat") {
     autoPlan: false,
     sessionToken: null as string | null,
     pendingForkSessionToken: null as string | null,
+    pendingForkAt: null as string | null,
     resumePending: undefined as boolean | undefined,
     lastModel: undefined as string | undefined,
     deletedAt: undefined as number | undefined,
@@ -3016,8 +3022,9 @@ function createFakeStore(options?: {
     async setSessionToken(chatId: string, sessionToken: string | null) {
       requireChat(chatId).sessionToken = sessionToken
     },
-    async setPendingForkSessionToken(chatId: string, pendingForkSessionToken: string | null) {
+    async setPendingForkSessionToken(chatId: string, pendingForkSessionToken: string | null, pendingForkAt: string | null = null) {
       requireChat(chatId).pendingForkSessionToken = pendingForkSessionToken
+      requireChat(chatId).pendingForkAt = pendingForkSessionToken === null ? null : pendingForkAt
     },
     async createChat() {
       return chat

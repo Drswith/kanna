@@ -182,6 +182,8 @@ export interface StartCodexSessionArgs {
   serviceTier?: ServiceTier
   sessionToken: string | null
   pendingForkSessionToken?: string | null
+  /** The source's last turn the fork keeps (`ChatRecord.pendingForkAt`). */
+  pendingForkAt?: string | null
 }
 
 export interface StartCodexTurnArgs {
@@ -1023,6 +1025,9 @@ export class CodexAppServerManager {
           approvalPolicy: "never",
           sandbox: "danger-full-access",
           persistExtendedHistory: false,
+          // Cut at the turn the fork's transcript ends on: the source may
+          // have run more turns since the fork was made.
+          ...(args.pendingForkAt ? { lastTurnId: args.pendingForkAt } : {}),
           ...toolConfig,
         } satisfies ThreadForkParams)
       } else if (args.sessionToken) {
@@ -1878,6 +1883,8 @@ export class CodexAppServerManager {
       type: "transcript",
       entry: timestamped({
         kind: "result",
+        // The turn's id: a fork of this chat branches through it (`forkPointOf`, `lastTurnId`).
+        ...(notification.turn.id ? { messageId: notification.turn.id } : {}),
         subtype: isCancelled ? "cancelled" : isError ? "error" : "success",
         isError,
         durationMs: 0,

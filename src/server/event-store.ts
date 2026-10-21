@@ -178,6 +178,39 @@ export function findLastCompletedTurnEnd(entries: TranscriptEntry[]) {
 }
 
 /**
+ * Where a fork branches off its source's provider session: the provider's id
+ * for the last thing the fork's copied transcript keeps. Null when it has no
+ * such id (a provider without one, or turns recorded before they were kept).
+ *
+ * The fork's transcript stops at the source's last completed turn, but the
+ * provider forks its own copy of the session as it stands when the fork
+ * first runs. A source that ran more turns by then would hand those to the
+ * fork too, unseen in its transcript, unless the fork is cut here.
+ *
+ * - Claude: the uuid of the last message on the session's main chain, its
+ *   assistant text, tool call or tool result (`resumeSessionAt`). Not a
+ *   subagent's (their messages live in their own files), and not the turn's
+ *   `result`, which the session file does not hold.
+ * - Codex: the id of the last completed turn (`lastTurnId`), which its
+ *   `result` entry carries.
+ */
+export function forkPointOf(provider: AgentProvider, entries: readonly TranscriptEntry[]): string | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!
+    if (!entry.messageId) continue
+    if (provider === "claude") {
+      if (entry.parentToolUseId) continue
+      if (entry.kind === "assistant_text" || entry.kind === "tool_call" || entry.kind === "tool_result") return entry.messageId
+    } else if (provider === "codex") {
+      if (entry.kind === "result") return entry.messageId
+    } else {
+      return null
+    }
+  }
+  return null
+}
+
+/**
  * Re-derive the sidebar preview fields from a fork's copied transcript. Forks
  * of an idle chat inherit these from the source record instead (it is the same
  * conversation), but a fork taken mid-turn drops the running turn, so the
@@ -1024,6 +1057,7 @@ export class EventStore {
         const chat = this.state.chatsById.get(event.chatId)
         if (!chat) break
         chat.pendingForkSessionToken = event.pendingForkSessionToken
+        chat.pendingForkAt = event.pendingForkAt ?? null
         chat.updatedAt = event.timestamp
         break
       }
@@ -1524,6 +1558,9 @@ export class EventStore {
       // by creation time alone.
       ...(sourceChat.lastTurnEndedAt != null ? { lastTurnEndedAt: sourceChat.lastTurnEndedAt } : {}),
       forkedFromChatId: sourceChatId,
+      // A delegator's fork is a delegator: the same conversation under the
+      // same system prompt, so the fork's first turn reads the source's cache.
+      ...(sourceChat.delegator ? { delegator: true as const } : {}),
       ...(options?.parentChatId ? { parentChatId: options.parentChatId } : {}),
       ...(options?.createdByChatId ? { createdByChatId: options.createdByChatId } : {}),
     }
@@ -1539,7 +1576,7 @@ export class EventStore {
     await this.setChatProvider(chatId, sourceChat.provider)
     await this.setPlanMode(chatId, sourceChat.planMode)
     await this.setAutoPlan(chatId, sourceChat.autoPlan)
-    await this.setPendingForkSessionToken(chatId, sourceSessionToken)
+    await this.setPendingForkSessionToken(chatId, sourceSessionToken, forkPointOf(sourceChat.provider, allEntries.slice(0, branchPoint)))
 
     // The fork gets its own copy of any images, and its entries point at
     // that copy, so deleting the source later does not blank its screenshots.
@@ -2344,15 +2381,18 @@ export class EventStore {
     await this.append(this.turnsLogPath, event)
   }
 
-  async setPendingForkSessionToken(chatId: string, pendingForkSessionToken: string | null) {
+  /** `pendingForkAt` is where the fork branches off that session (`ChatRecord.pendingForkAt`); cleared with the token. */
+  async setPendingForkSessionToken(chatId: string, pendingForkSessionToken: string | null, pendingForkAt: string | null = null) {
     const chat = this.requireChat(chatId)
-    if ((chat.pendingForkSessionToken ?? null) === pendingForkSessionToken) return
+    const at = pendingForkSessionToken === null ? null : pendingForkAt
+    if ((chat.pendingForkSessionToken ?? null) === pendingForkSessionToken && (chat.pendingForkAt ?? null) === at) return
     const event: TurnEvent = {
       v: STORE_VERSION,
       type: "pending_fork_session_token_set",
       timestamp: Date.now(),
       chatId,
       pendingForkSessionToken,
+      ...(at !== null ? { pendingForkAt: at } : {}),
     }
     await this.append(this.turnsLogPath, event)
   }

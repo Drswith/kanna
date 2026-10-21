@@ -283,6 +283,7 @@ interface AgentCoordinatorArgs {
     delegator?: boolean
     sessionToken: string | null
     forkSession: boolean
+    resumeSessionAt?: string
     customTools?: KannaToolHost
     onToolRequest: (request: HarnessToolRequest) => Promise<unknown>
     onRateLimitEvent?: (info: ClaudeRateLimitInfoRaw) => void
@@ -899,6 +900,12 @@ async function startClaudeSession(args: {
   delegator?: boolean
   sessionToken: string | null
   forkSession: boolean
+  /**
+   * With `forkSession`: the source session's last message the fork keeps
+   * (`ChatRecord.pendingForkAt`). Without it the SDK copies the whole session
+   * as it is now, turns the source ran since the fork was made included.
+   */
+  resumeSessionAt?: string
   customTools?: KannaToolHost
   onToolRequest: (request: HarnessToolRequest) => Promise<unknown>
   onRateLimitEvent?: (info: ClaudeRateLimitInfoRaw) => void
@@ -978,6 +985,7 @@ async function startClaudeSession(args: {
       effort: args.effort as "low" | "medium" | "high" | "max" | undefined,
       resume: args.sessionToken ?? undefined,
       forkSession: args.forkSession,
+      ...(args.forkSession && args.resumeSessionAt ? { resumeSessionAt: args.resumeSessionAt } : {}),
       permissionMode: args.planMode ? "plan" : "acceptEdits",
       canUseTool,
       ...(args.customTools ? {
@@ -2147,6 +2155,7 @@ export class AgentCoordinator {
         delegator,
         sessionToken: chat.pendingForkSessionToken ?? chat.sessionToken,
         forkSession: Boolean(chat.pendingForkSessionToken),
+        ...(chat.pendingForkSessionToken && chat.pendingForkAt ? { resumeSessionAt: chat.pendingForkAt } : {}),
         onToolRequest,
         customTools,
       })
@@ -2212,6 +2221,7 @@ export class AgentCoordinator {
         serviceTier: args.serviceTier,
         sessionToken: chat.sessionToken,
         pendingForkSessionToken: chat.pendingForkSessionToken,
+        pendingForkAt: chat.pendingForkAt,
       })
       if (chat.pendingForkSessionToken && started?.sessionToken) {
         await this.store.setPendingForkSessionToken(args.chatId, null)
@@ -2322,6 +2332,7 @@ export class AgentCoordinator {
     delegator: boolean
     sessionToken: string | null
     forkSession: boolean
+    resumeSessionAt?: string
     customTools?: KannaToolHost
     onToolRequest: (request: HarnessToolRequest) => Promise<unknown>
   }): Promise<HarnessTurn> {
@@ -2356,6 +2367,7 @@ export class AgentCoordinator {
         delegator: args.delegator,
         sessionToken: args.sessionToken,
         forkSession: args.forkSession,
+        ...(args.resumeSessionAt ? { resumeSessionAt: args.resumeSessionAt } : {}),
         onToolRequest: args.onToolRequest,
         customTools: args.customTools,
         onRateLimitEvent: (info) => this.onClaudeRateLimit?.(info),
