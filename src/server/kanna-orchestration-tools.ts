@@ -1,6 +1,5 @@
 import { z } from "zod"
 import type { AgentProvider } from "../shared/types"
-import { attachmentItemSchema, resolveAttachments } from "./kanna-display-tools"
 import type { KannaToolDefinition, KannaToolResult } from "./kanna-tools"
 import { READ_CHAT_KINDS, type ChatOrchestrator } from "./orchestrator"
 
@@ -60,24 +59,11 @@ const readChat = z.strictObject({
   limit: z.number().int().min(1).max(200).optional().describe("Most entries per call. Default 40."),
 })
 
-/**
- * The ticket a delegator's hand-off is for. Required from a delegator, one
- * or the other, and ignored from any other chat (`chooseTicket`).
- */
-const ticketChoice = {
-  ticketId: z.string().optional().describe("Delegator chats: the ticket this work is for. Naming a Done ticket reopens it, so do that only for a defect in what it delivered; a new ask takes ticket instead. A delegator must pass this or ticket."),
-  ticket: z.strictObject({
-    title: z.string().min(1),
-    body: z.string().optional().describe("Markdown: what the work is and what done looks like."),
-  }).optional().describe("Delegator chats: create the ticket for this work in the same call. One ask per ticket."),
-}
-
 const createChat = z.strictObject({
   message: z.string().min(1).describe("The chat's first message. It sees nothing else of this conversation, so say everything it needs."),
   title: z.string().optional(),
   subchat: z.boolean().optional().describe("Default true: its result is sent back to this chat when it finishes, and stopping this chat stops it. false makes an independent chat for the user."),
   projectId: z.string().optional().describe("Defaults to this chat's project."),
-  ...ticketChoice,
   ...runOptions,
 })
 
@@ -86,14 +72,12 @@ const forkChat = z.strictObject({
   message: z.string().optional().describe("A first message for the copy. Without one it sits idle."),
   title: z.string().optional(),
   subchat: z.boolean().optional().describe("Whether the copy reports back to this chat. Defaults to true when a message is given."),
-  ...ticketChoice,
   ...runOptions,
 })
 
 const sendMessage = z.strictObject({
   chatId: z.string(),
   message: z.string().min(1),
-  ...ticketChoice,
   delivery: z.enum(["queue", "steer"]).optional().describe("queue (default) starts it now if the chat is idle and after its current turn otherwise. steer interrupts the current turn to deliver it now."),
   adopt: z.boolean().optional().describe("true adopts the chat: this chat becomes its parent, as if it had started it. Use it when you hand work to an existing chat and need the result. From this message on, its reply arrives here as a message when its turn ends, it is listed as this chat's sub-chat, and this chat is not finished while that reply is owed. It stays adopted: later messages need no flag, and there is no undo. It is still the user's chat: it stays in their sidebar, and stopping this chat does not stop it, only drops the reply it owes. A chat that had another parent is taken from it, and that parent is told no more results are coming. A chat above this one, in the chain of chats that started it, cannot be adopted. Leave it unset for a message that needs no answer."),
   ...runOptions,
@@ -143,34 +127,6 @@ const deleteSchedule = z.strictObject({
   scheduleId: z.string(),
 })
 
-const createTicket = z.strictObject({
-  title: z.string().min(1),
-  body: z.string().optional().describe("Markdown: what the work is and what done looks like. Not progress."),
-})
-
-const updateTicket = z.strictObject({
-  ticketId: z.string(),
-  title: z.string().optional(),
-  body: z.string().optional().describe("Replaces the body. Only when the ask or the plan changes."),
-  status: z.enum(["done", "open"]).optional().describe("done closes it; open reopens it."),
-})
-
-const replyToTicket = z.strictObject({
-  ticketId: z.string(),
-  text: z.string().describe("Markdown."),
-  asksUser: z.boolean().optional().describe("true only for a question that blocks the work or its Done; the ticket waits on the user until they reply. false withdraws an open question."),
-  attachments: z.array(attachmentItemSchema).max(24).optional().describe("Files to show with the reply: local paths or HTTP/HTTPS URLs, as send_attachments takes them."),
-})
-
-const readTicket = z.strictObject({
-  ticketId: z.string(),
-})
-
-const listTickets = z.strictObject({
-  status: z.enum(["waiting_on_you", "in_progress", "done", "open"]).optional().describe("open is anything not done."),
-  limit: z.number().int().min(1).max(200).optional().describe("Default 50."),
-})
-
 export const ORCHESTRATION_TOOLS: readonly KannaToolDefinition[] = [
   {
     name: "get_context",
@@ -201,8 +157,8 @@ export const ORCHESTRATION_TOOLS: readonly KannaToolDefinition[] = [
     description: "Start a new chat with a first message, on any provider and model. Returns at once. By default it is a sub-chat of this one: its reply arrives here as a message when its turn ends. If it is still waiting on work it handed off, the message says so and another follows when that work comes back.",
     schema: createChat,
     async execute(input, context) {
-      const { message, title, subchat, projectId, ticketId, ticket, ...run } = createChat.parse(input)
-      return reply(await orchestration(context).createChat(context.chatId, { message, title, subchat, projectId, ticketId, ticket, ...(run as Run) }))
+      const { message, title, subchat, projectId, ...run } = createChat.parse(input)
+      return reply(await orchestration(context).createChat(context.chatId, { message, title, subchat, projectId, ...(run as Run) }))
     },
   },
   {
@@ -210,8 +166,8 @@ export const ORCHESTRATION_TOOLS: readonly KannaToolDefinition[] = [
     description: "Copy a chat, conversation included, into a new chat that continues separately. The original is untouched.",
     schema: forkChat,
     async execute(input, context) {
-      const { chatId, message, title, subchat, ticketId, ticket, ...run } = forkChat.parse(input)
-      return reply(await orchestration(context).forkChat(context.chatId, { chatId, message, title, subchat, ticketId, ticket, ...(run as Run) }))
+      const { chatId, message, title, subchat, ...run } = forkChat.parse(input)
+      return reply(await orchestration(context).forkChat(context.chatId, { chatId, message, title, subchat, ...(run as Run) }))
     },
   },
   {
@@ -219,8 +175,8 @@ export const ORCHESTRATION_TOOLS: readonly KannaToolDefinition[] = [
     description: "Send a message to another chat, as the user would. It starts a turn if the chat is idle and queues behind the current turn otherwise. A chat this one did not start sends nothing back when it finishes, unless this chat adopts it (adopt).",
     schema: sendMessage,
     async execute(input, context) {
-      const { chatId, message, delivery, adopt, ticketId, ticket, ...run } = sendMessage.parse(input)
-      return reply(await orchestration(context).sendMessage(context.chatId, { chatId, message, delivery, adopt, ticketId, ticket, ...(run as Run) }))
+      const { chatId, message, delivery, adopt, ...run } = sendMessage.parse(input)
+      return reply(await orchestration(context).sendMessage(context.chatId, { chatId, message, delivery, adopt, ...(run as Run) }))
     },
   },
   {
@@ -270,56 +226,6 @@ export const ORCHESTRATION_TOOLS: readonly KannaToolDefinition[] = [
     schema: deleteSchedule,
     async execute(input, context) {
       return reply(await orchestration(context).deleteSchedule(deleteSchedule.parse(input).scheduleId))
-    },
-  },
-  {
-    name: "create_ticket",
-    description: "Delegator chats only. Add a ticket to this chat's board: one piece of work the user follows there. The body says what the work is and what done looks like, never progress. Returns ticketId and number. create_chat, send_message and fork_chat can also create one in the same call (ticket).",
-    schema: createTicket,
-    async execute(input, context) {
-      return reply(await orchestration(context).createTicket(context.chatId, createTicket.parse(input)))
-    },
-  },
-  {
-    name: "update_ticket",
-    description: "Delegator chats only. Rename a ticket or replace its body when its ask changes, so both match the work. A ticket is Done by itself once its chats have reported and nothing is asked. status done closes one whose work ends without a report (answered here, dropped, superseded) and clears its question. status open reopens one only for a defect in what it delivered; a new ask is a new ticket. A chat on it that is still working or waiting on the user keeps it out of Done until it finishes.",
-    schema: updateTicket,
-    async execute(input, context) {
-      return reply(await orchestration(context).updateTicket(context.chatId, updateTicket.parse(input)))
-    },
-  },
-  {
-    name: "reply_to_ticket",
-    description: "Delegator chats only. Post on a ticket. The user reads the ticket, not this chat, and this is the only way to write on one. Post when its work comes back: start with whether the body's done-when is met, then what the user should know or try. Or post when you decide something for the user. Do not post a plan, a hand-off (the ticket records it) or \"nothing new\". asksUser: true puts the ticket in Waiting on you until the user replies there. Use it only when the work cannot go on, or be called done, without the answer, and lead with the question. A choice with a sensible default is not a block: name the default in the text and go on. asksUser: false withdraws a question settled elsewhere. For a mockup or a chart, call show_visualization with ticketId. Returns replyId.",
-    schema: replyToTicket,
-    async execute(input, context) {
-      const { ticketId, text, asksUser, attachments } = replyToTicket.parse(input)
-      const tickets = orchestration(context)
-      // Checked before any file is copied, so a wrong ticket leaves nothing behind.
-      tickets.checkTicket(context.chatId, ticketId)
-      const files = attachments?.length ? await resolveAttachments(attachments, context) : null
-      try {
-        return reply(await tickets.replyToTicket(context.chatId, { ticketId, text, asksUser, artifacts: files?.attachments }))
-      } catch (error) {
-        await files?.cleanup()
-        throw error
-      }
-    },
-  },
-  {
-    name: "read_ticket",
-    description: "Delegator chats only. Read a ticket whole: its body, replies and history, and its chats with how each stands now.",
-    schema: readTicket,
-    async execute(input, context) {
-      return reply(orchestration(context).readTicket(context.chatId, readTicket.parse(input).ticketId))
-    },
-  },
-  {
-    name: "list_tickets",
-    description: "Delegator chats only. This chat's tickets, latest activity first, each with its state (waiting_on_you, in_progress or done), a line of status, and its chats.",
-    schema: listTickets,
-    async execute(input, context) {
-      return reply(orchestration(context).listTickets(context.chatId, listTickets.parse(input)))
     },
   },
 ]

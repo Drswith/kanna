@@ -47,26 +47,10 @@ describe("buildKannaSystemInstructions", () => {
     expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Do not redo")
     const named = [...KANNA_DELEGATOR_INSTRUCTIONS.matchAll(/`([a-z_]+)`/g)].map((match) => match[1]!)
     for (const name of named) expect(KANNA_TOOL_NAMES as readonly string[]).toContain(name)
-    // The ticket board's rules: a delegator's only guide to it.
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Every hand-off names a ticket")
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("never progress.")
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Only `reply_to_ticket` writes on a ticket.")
-    // A delegator once reopened a Done ticket for each small new ask in its
-    // area. A new ask gets its own ticket; the chat can still be the same one.
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("A new ask is a new ticket")
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("So is anything asked after a ticket is Done.")
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("the same piece of work, or a new request?")
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("The ticket separates the asks, not the chat")
-    // What it tells the user about is the ticket, which opens in the pane.
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("link its ticket, not the chat: [#8 Title](link)")
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Link a chat only when the user needs the chat itself.")
-    // A delegator once pinned each commit on whichever ticket was nearby, so
-    // the rest kept saying "uncommitted" after the push.
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("A commit or push is a ticket of its own")
-    // It filled tickets with "nothing new" and with plans the hand-off rows already showed.
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("post nothing when nothing is new")
-    // And let titles and bodies drift from the work they had grown into.
-    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("rewrite the title and body")
+    // It says where each task went, and what came back, in this chat.
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("Tell the user which you did, and link the chat.")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).toContain("When a chat reports, tell the user briefly what came back.")
+    expect(KANNA_DELEGATOR_INSTRUCTIONS).not.toMatch(/ticket/i)
     // Every delegator turn pays for it.
     expect(KANNA_DELEGATOR_INSTRUCTIONS.length).toBeLessThan(2_200)
   })

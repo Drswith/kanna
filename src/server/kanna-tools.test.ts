@@ -47,7 +47,7 @@ async function until(predicate: () => boolean) {
 describe("shared Kanna display tools", () => {
   test("attachment inputs omit descriptions and captions", async () => {
     const spec = kannaToolSpecs().find(tool => tool.name === "send_attachments")!
-    expect(Object.keys(spec.inputSchema.properties ?? {})).toEqual(["attachments", "ticketId"])
+    expect(Object.keys(spec.inputSchema.properties ?? {})).toEqual(["attachments"])
     expect(JSON.stringify(spec.inputSchema)).not.toContain('"caption"')
     const { runtime } = setup()
     const result = await runtime.execute("send_attachments", attachments)
@@ -62,7 +62,6 @@ describe("shared Kanna display tools", () => {
       "show_visualization", "send_attachments", "generate_images",
       "get_context", "list_chats", "read_chat", "create_chat", "fork_chat", "send_message",
       "cancel_chat", "update_chat", "update_queued_message", "set_schedule", "list_schedules", "delete_schedule",
-      "create_ticket", "update_ticket", "reply_to_ticket", "read_ticket", "list_tickets",
     ])
     const { runtime, entries } = setup()
     expect(await runtime.execute("show_visualization", visualization)).toMatchObject({ structuredContent: { displayed: true } })
@@ -201,6 +200,12 @@ describe("shared Kanna display tools", () => {
     // Without a server behind the runtime the tools say so instead of failing oddly.
     expect(await runtime.execute("list_chats", {})).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("not available") }] })
   })
+  test("no tool has anything of tickets or checkpoints left", async () => {
+    const names = kannaToolSpecs().map((spec) => spec.name)
+    expect(names.some((name) => /ticket|checkpoint/.test(name))).toBe(false)
+    expect(JSON.stringify(kannaToolSpecs())).not.toMatch(/ticket|checkpoint/i)
+  })
+
   test("every tool description fits in what Claude Code shows of one (2,048 characters)", () => {
     const over = kannaToolSpecs().filter((spec) => spec.description.length > 2_048).map((spec) => spec.name)
     expect(over).toEqual([])

@@ -98,9 +98,7 @@ export async function resolveAttachments(
   }
 }
 
-const sendAttachmentsSchema = attachmentSchema.extend({
-  ticketId: z.string().optional().describe("Delegator chats only: also post these on this ticket, as a reply. Other chats cannot post on tickets."),
-})
+const sendAttachmentsSchema = attachmentSchema
 
 export const DISPLAY_TOOLS: readonly KannaToolDefinition[] = [
   SHOW_VISUALIZATION_TOOL,
@@ -109,22 +107,10 @@ export const DISPLAY_TOOLS: readonly KannaToolDefinition[] = [
     description: "Show images, videos, and file links in the chat. Supply local paths or HTTP/HTTPS URLs. Local files are copied into the chat so they remain available after the source changes. Images and videos appear inline; other files appear as download links.",
     schema: sendAttachmentsSchema,
     async execute(input, context) {
-      const { attachments, ticketId } = sendAttachmentsSchema.parse(input)
-      // Before anything is copied, so a wrong ticket leaves nothing behind.
-      if (ticketId) {
-        if (!context.orchestration) throw new Error("Tickets are not available in this session.")
-        context.orchestration.checkTicket(context.chatId, ticketId)
-      }
-      const { attachments: resolved, cleanup } = await resolveAttachments(attachments, context)
-      if (ticketId) {
-        // The same files, by the same URLs: the ticket refers to them, it does not copy them.
-        await context.orchestration!.replyToTicket(context.chatId, { ticketId, text: "", artifacts: resolved }).catch(async (error) => {
-          await cleanup()
-          throw error
-        })
-      }
+      const { attachments } = sendAttachmentsSchema.parse(input)
+      const { attachments: resolved } = await resolveAttachments(attachments, context)
       return {
-        content: [{ type: "text", text: `Displayed ${resolved.length} attachment${resolved.length === 1 ? "" : "s"}${ticketId ? `, and posted them on ticket ${ticketId}` : ""}.` }],
+        content: [{ type: "text", text: `Displayed ${resolved.length} attachment${resolved.length === 1 ? "" : "s"}.` }],
         structuredContent: { displayed: true, attachments: resolved },
         transcriptContent: resolved,
       }

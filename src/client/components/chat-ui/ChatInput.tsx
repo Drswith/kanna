@@ -224,9 +224,9 @@ interface Props {
    */
   delegate?: ComposerDelegate
   /**
-   * Where the draft is kept, when it is not the chat's own: a ticket's
-   * composer writes to the delegator's chat but keeps its draft per ticket,
-   * so neither the chat's draft nor another ticket's is touched.
+   * Where the draft is kept, when it is not the chat's own: a second
+   * composer that writes to the chat but keeps a draft of its own, so the
+   * chat's draft is not touched.
    */
   draftKey?: string
 }
