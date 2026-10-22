@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { rm } from "node:fs/promises"
+import { copyFile, lstat, rm, stat, utimes } from "node:fs/promises"
 import path from "node:path"
 import { LOG_PREFIX } from "../shared/branding"
 import { readTreeBlobs, resolveWorkingTreeLocation, runGit, type WorkingTreeLocation } from "./diff-store"
@@ -39,18 +39,45 @@ import type { TouchedFile } from "./events"
 /** A path one turn changed, and the committed content it was based on. */
 export type { TouchedFile } from "./events"
 
+/**
+ * Dirty files at or above this size are fingerprinted by size and mtime rather
+ * than hashed. Snapshots run on every turn boundary of every chat, and a
+ * project that renders video or keeps datasets untracked would otherwise have
+ * each one hash, compress and write gigabytes of loose objects that nothing
+ * ever prunes. Source files sit far below this.
+ *
+ * The fingerprint is a stat, not the content, so a `touch` or a rewrite with
+ * identical bytes still counts as a change. Reading the file to rule that out
+ * is the cost this exists to avoid.
+ */
+export const LARGE_FILE_BYTES = 5 * 1024 * 1024
+
+/** The worktree at one instant. */
+interface Snapshot {
+  /** Tree object of the worktree, dirty content included, large files left out. */
+  tree: string
+  /** The large dirty files `tree` leaves out: path → `size:mtime:ctime:ino`. */
+  largeFiles: Map<string, string>
+}
+
 /** What `beginTurn` banks: the pre-turn worktree, and the commit it sat on. */
 interface PendingTurn {
-  /** Tree object of the whole worktree, dirty content included. */
-  tree: string | null
+  snapshot: Snapshot | null
   /** `HEAD` at turn start; `null` on an unborn HEAD (nothing committed yet). */
   head: string | null
+}
+
+/** A project's capture now running, and the one queued to start after it. */
+interface CaptureQueue {
+  running?: Promise<Snapshot | null>
+  next?: Promise<Snapshot | null>
 }
 
 /** Per-chat pre-turn state, plus a location cache so `git rev-parse` runs once per project. */
 export class TurnFileTracker {
   private readonly pendingTurns = new Map<string, Promise<PendingTurn>>()
   private readonly locations = new Map<string, Promise<WorkingTreeLocation | null>>()
+  private readonly captureQueues = new Map<string, CaptureQueue>()
 
   constructor(
     private readonly options: {
@@ -66,6 +93,9 @@ export class TurnFileTracker {
    * agent's first tool call, which is fine — a file the agent changes before
    * the snapshot lands simply shows up as pre-existing dirt rather than as this
    * turn's work. Blocking the turn on a `git add -A` would be the worse trade.
+   * Captures run one per project (see `captureSnapshot`), so this one can also
+   * wait out a capture already running for another chat, which widens that
+   * window by up to one capture.
    *
    * Returns the capture promise so tests can wait for a deterministic baseline;
    * production callers ignore it.
@@ -92,9 +122,9 @@ export class TurnFileTracker {
     if (!localPath) return
 
     try {
-      const [pre, postTree] = await Promise.all([pending, this.captureTree(localPath)])
-      if (!pre.tree || !postTree || pre.tree === postTree) return
-      const changes = await this.diffTrees(localPath, pre.tree, postTree)
+      const [pre, post] = await Promise.all([pending, this.captureSnapshot(localPath)])
+      if (!pre.snapshot || !post) return
+      const changes = await this.diffSnapshots(localPath, pre.snapshot, post)
       if (changes.length === 0) return
       await this.options.recordFiles(chatId, await this.toTouchedFiles(localPath, pre.head, changes))
     } catch (error) {
@@ -131,11 +161,11 @@ export class TurnFileTracker {
 
   /** The pre-turn worktree and the commit it sits on, captured together. */
   private async captureTurn(localPath: string): Promise<PendingTurn> {
-    const [tree, head] = await Promise.all([
-      this.captureTree(localPath),
+    const [snapshot, head] = await Promise.all([
+      this.captureSnapshot(localPath),
       this.readHead(localPath),
     ])
-    return { tree, head }
+    return { snapshot, head }
   }
 
   /** `null` on an unborn HEAD or a project that isn't a repo. */
@@ -155,29 +185,96 @@ export class TurnFileTracker {
   }
 
   /**
+   * One capture per project at a time. Every chat in a project snapshots the
+   * same worktree, so parallel captures only compete for the disk. A request
+   * joins the queued capture if there is one, since that capture has not
+   * started yet and so still sees everything up to the request. It never
+   * joins the running one, which may have read the tree before the request
+   * was made.
+   */
+  private captureSnapshot(localPath: string): Promise<Snapshot | null> {
+    let queue = this.captureQueues.get(localPath)
+    if (!queue) {
+      queue = {}
+      this.captureQueues.set(localPath, queue)
+    }
+    if (queue.next) return queue.next
+    if (!queue.running) return this.startCapture(localPath, queue)
+    const ready = queue.running.then(() => undefined, () => undefined)
+    const next = ready.then(() => {
+      queue.next = undefined
+      return this.startCapture(localPath, queue)
+    })
+    queue.next = next
+    return next
+  }
+
+  private startCapture(localPath: string, queue: CaptureQueue): Promise<Snapshot | null> {
+    const running = this.writeSnapshot(localPath).finally(() => {
+      if (queue.running === running) queue.running = undefined
+    })
+    queue.running = running
+    return running
+  }
+
+  /**
    * The whole worktree as a tree object, untracked files included and
    * `.gitignore` respected — `git add -A` decides both for us, so the snapshot
-   * matches what `git status` reports as dirty.
+   * matches what `git status` reports as dirty. Large dirty files are left out
+   * of the tree and fingerprinted instead (see `LARGE_FILE_BYTES`).
    */
-  private async captureTree(localPath: string): Promise<string | null> {
+  private async writeSnapshot(localPath: string): Promise<Snapshot | null> {
     const location = await this.locationFor(localPath)
     if (!location) return null
 
     const indexPath = path.join(location.gitDir, `kanna-snapshot-index-${randomUUID()}`)
     const env = { ...process.env, GIT_INDEX_FILE: indexPath }
     try {
-      // Seed from HEAD so `add -A` only has to hash what actually differs.
-      // Without this every snapshot re-hashes the entire worktree. Failure is
-      // fine and expected on an unborn HEAD (a repo with no commits yet).
-      await runGit(["read-tree", "HEAD"], location.repoRoot, { env })
-      const added = await runGit(["add", "-A", "--", "."], location.repoRoot, { env })
+      await seedIndex(location, indexPath, env)
+      const largeFiles = await findLargeDirtyFiles(location.repoRoot, env)
+      if (!largeFiles) return null
+      // Literal so a path with `*` or `[` in it excludes only itself. Over
+      // stdin so no number of large files can hit the argument limit; that
+      // needs git 2.25+, and older git fails the `add`, so turns record nothing.
+      const pathspecs = [".", ...[...largeFiles.keys()].map((filePath) => `:(exclude,literal)${filePath}`)]
+      const added = await runGit(
+        ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        location.repoRoot,
+        { env, stdin: pathspecs.join("\0") },
+      )
       if (added.exitCode !== 0) return null
       const written = await runGit(["write-tree"], location.repoRoot, { env })
       if (written.exitCode !== 0) return null
-      return written.stdout.trim() || null
+      const tree = written.stdout.trim()
+      return tree ? { tree, largeFiles } : null
     } finally {
       await rm(indexPath, { force: true }).catch(() => undefined)
     }
+  }
+
+  /**
+   * Tree changes plus large-file changes. A large file has no blob on either
+   * side, so it carries no line counts, the same as a binary file.
+   */
+  private async diffSnapshots(localPath: string, before: Snapshot, after: Snapshot): Promise<TurnFileChange[]> {
+    const treeChanges = before.tree === after.tree ? [] : await this.diffTrees(localPath, before.tree, after.tree)
+    const largeChanged = new Set<string>()
+    for (const [filePath, fingerprint] of before.largeFiles) {
+      if (after.largeFiles.get(filePath) !== fingerprint) largeChanged.add(filePath)
+    }
+    for (const filePath of after.largeFiles.keys()) {
+      if (!before.largeFiles.has(filePath)) largeChanged.add(filePath)
+    }
+    // A large file's tree entry is whatever the user's index holds for it, since
+    // `add -A` skipped it, so staging one mid-turn changes the tree without the
+    // turn touching it. Only the fingerprints speak for a path that was large on
+    // either side. That also covers a file crossing the threshold, whose
+    // tree-side counts would describe only half the change.
+    const large = new Set([...before.largeFiles.keys(), ...after.largeFiles.keys()])
+    return [
+      ...treeChanges.filter((change) => !large.has(change.path)),
+      ...[...largeChanged].map((filePath) => ({ path: filePath })),
+    ]
   }
 
   /**
@@ -202,6 +299,69 @@ export class TurnFileTracker {
     return parseNumstat(diff.stdout)
   }
 }
+
+/**
+ * Starts the throwaway index as a copy of the real one, so `add -A` hashes only
+ * what changed since the user's last `git status`. The copy brings the stat
+ * cache with it. An index seeded by `read-tree HEAD` has none, so every
+ * tracked file would be re-hashed on every snapshot. The copy keeps its mtime
+ * because git's racy-clean check compares entries against it. With no index
+ * to copy, seed from HEAD; that fails, as expected, on an unborn HEAD.
+ */
+async function seedIndex(location: WorkingTreeLocation, indexPath: string, env: Record<string, string | undefined>) {
+  const userIndex = path.join(location.gitDir, "index")
+  try {
+    const { atime, mtime } = await stat(userIndex)
+    await copyFile(userIndex, indexPath)
+    await utimes(indexPath, atime, mtime)
+  } catch {
+    await rm(indexPath, { force: true }).catch(() => undefined)
+    await runGit(["read-tree", "HEAD"], location.repoRoot, { env })
+  }
+}
+
+/**
+ * Dirty files at or above `LARGE_FILE_BYTES`, by path, each with a
+ * `size:mtime:ctime:ino` fingerprint. ctime can't be set back and a replaced
+ * file gets a new inode, so a same-size edit that keeps the old mtime
+ * (`cp -p`, `rsync -a`) still shows.
+ *
+ * Dirty means untracked, or different from `HEAD`, staged or not. Measured
+ * against the index instead, staging a file would take it out of the set, and
+ * the turn it happened in would read that as a change. `diff-index` compares
+ * stat data and never reads a file, and with `ls-files` it costs a directory
+ * walk and a stat per file. On an unborn HEAD everything in the index is
+ * uncommitted, so the index is the list.
+ *
+ * A deleted file can't be stat'ed and is left to `add -A`, which records the
+ * deletion without hashing anything.
+ */
+async function findLargeDirtyFiles(
+  repoRoot: string,
+  env: Record<string, string | undefined>
+): Promise<Map<string, string> | null> {
+  const [untracked, againstHead] = await Promise.all([
+    runGit(["ls-files", "-z", "--others", "--exclude-standard"], repoRoot, { env }),
+    runGit(["diff-index", "--name-only", "-z", "--no-renames", "HEAD"], repoRoot, { env }),
+  ])
+  const changed = againstHead.exitCode === 0
+    ? againstHead
+    : await runGit(["ls-files", "-z", "--cached"], repoRoot, { env })
+  if (untracked.exitCode !== 0 || changed.exitCode !== 0) return null
+  const paths = [...new Set(`${untracked.stdout}\0${changed.stdout}`.split("\0").filter(Boolean))]
+  const largeFiles = new Map<string, string>()
+  for (let index = 0; index < paths.length; index += STAT_BATCH) {
+    await Promise.all(paths.slice(index, index + STAT_BATCH).map(async (filePath) => {
+      const stats = await lstat(path.join(repoRoot, filePath)).catch(() => null)
+      if (stats?.isFile() && stats.size >= LARGE_FILE_BYTES) {
+        largeFiles.set(filePath, `${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}:${stats.ino}`)
+      }
+    }))
+  }
+  return largeFiles
+}
+
+const STAT_BATCH = 256
 
 /** One path a turn changed, with the lines it added and removed there. */
 export interface TurnFileChange {
