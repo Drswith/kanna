@@ -88,6 +88,26 @@ describe("read models", () => {
     expect(runtime("parent")).not.toHaveProperty("parentChatId")
   })
 
+  test("a fork's snapshot names its source and where the copy ends", () => {
+    const state = createEmptyState()
+    state.projectsById.set("p", { id: "p", localPath: "/tmp/p", title: "P", createdAt: 1, updatedAt: 1 })
+    const chat = (id: string, extra: Record<string, unknown> = {}) => ({
+      id, projectId: "p", title: id, createdAt: 50, updatedAt: 50, unread: false, provider: null,
+      planMode: false, autoPlan: false, sessionToken: null, hasMessages: true, lastMessageAt: 50, lastTurnOutcome: null,
+      ...extra,
+    })
+    state.chatsById.set("source", chat("source"))
+    state.chatsById.set("fork", chat("fork", { forkedFromChatId: "source", forkedEntryCount: 4 }))
+    const runtime = (chatId: string, forkEntryCount?: number) => deriveChatSnapshot(state, new Map(), new Set(), chatId, () => ({
+      messages: [], startIndex: 0, readAnchor: null, ...(forkEntryCount != null ? { forkEntryCount } : {}),
+    }))?.runtime
+
+    expect(runtime("fork")?.forkedFrom).toEqual({ chatId: "source", at: 50, entryCount: 4 })
+    // The store's count, which it derives for a fork that recorded none.
+    expect(runtime("fork", 2)?.forkedFrom?.entryCount).toBe(2)
+    expect(runtime("source")).not.toHaveProperty("forkedFrom")
+  })
+
   test("a chat's snapshot carries the schedules to do with it", () => {
     const state = createEmptyState()
     state.projectsById.set("p", { id: "p", localPath: "/tmp/p", title: "P", createdAt: 1, updatedAt: 1 })

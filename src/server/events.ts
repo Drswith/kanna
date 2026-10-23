@@ -169,6 +169,12 @@ export interface ChatRecord {
   delegator?: true
   /** The chat this one was forked from. */
   forkedFromChatId?: string
+  /**
+   * On a fork: how many transcript entries were copied from the source, so
+   * the copied history ends before this index. Absent on forks made before it
+   * was recorded; `forkEntryCount` derives it for those.
+   */
+  forkedEntryCount?: number
   /** The chat whose agent created this one. Absent when a user did. */
   createdByChatId?: string
   /**
@@ -290,6 +296,7 @@ export type ChatEvent =
       /** See the fields of the same names on `ChatRecord`. Absent on old logs. */
       parentChatId?: string
       forkedFromChatId?: string
+      forkedEntryCount?: number
       createdByChatId?: string
       delegator?: boolean
     }

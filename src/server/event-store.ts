@@ -807,6 +807,7 @@ export class EventStore {
           ...(event.lastTurnEndedAt != null ? { lastTurnEndedAt: event.lastTurnEndedAt } : {}),
           ...(event.parentChatId ? { parentChatId: event.parentChatId } : {}),
           ...(event.forkedFromChatId ? { forkedFromChatId: event.forkedFromChatId } : {}),
+          ...(event.forkedFromChatId && event.forkedEntryCount != null ? { forkedEntryCount: event.forkedEntryCount } : {}),
           ...(event.createdByChatId ? { createdByChatId: event.createdByChatId } : {}),
           ...(event.delegator ? { delegator: true as const } : {}),
         }
@@ -1558,6 +1559,9 @@ export class EventStore {
       // by creation time alone.
       ...(sourceChat.lastTurnEndedAt != null ? { lastTurnEndedAt: sourceChat.lastTurnEndedAt } : {}),
       forkedFromChatId: sourceChatId,
+      // Where the copied history ends, for the "Forked from" line the fork's
+      // transcript draws there (`forkEntryCount`).
+      forkedEntryCount: branchPoint,
       // A delegator's fork is a delegator: the same conversation under the
       // same system prompt, so the fork's first turn reads the source's cache.
       ...(sourceChat.delegator ? { delegator: true as const } : {}),
@@ -2481,7 +2485,25 @@ export class EventStore {
       startIndex: start,
       readAnchor: this.getChatReadAnchor(chatId),
       outline: this.getTranscriptOutline(chatId, entries),
+      ...this.forkEntryCountField(chatId, entries),
     }
+  }
+
+  /**
+   * On a fork, the index its own history starts at: the copied entries come
+   * first, and the transcript draws "Forked from" after them.
+   *
+   * A fork records the count when it is made. One made before that did not,
+   * and gets it from the clock instead: every copied entry was written before
+   * the fork was created, and everything the fork wrote itself came after.
+   */
+  private forkEntryCountField(chatId: string, entries: TranscriptEntry[]): { forkEntryCount?: number } {
+    const chat = this.state.chatsById.get(chatId)
+    if (!chat?.forkedFromChatId) return {}
+    if (chat.forkedEntryCount != null) return { forkEntryCount: Math.min(chat.forkedEntryCount, entries.length) }
+    let count = 0
+    while (count < entries.length && entries[count]!.createdAt < chat.createdAt) count += 1
+    return { forkEntryCount: count }
   }
 
   /**

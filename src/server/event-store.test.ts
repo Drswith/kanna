@@ -920,6 +920,41 @@ describe("EventStore", () => {
     expect(reloaded.getMessages(forked.id)).toHaveLength(3)
   })
 
+  test("a fork records where its copied history ends, and a fork made before that derives it", async () => {
+    const dataDir = await createTempDataDir()
+    const store = new EventStore(dataDir)
+    await store.initialize()
+    const project = await store.openProject("/tmp/project")
+    const source = await store.createChat(project.id)
+    await store.setChatProvider(source.id, "claude")
+    await store.setSessionToken(source.id, "session-1")
+    await store.recordTurnStarted(source.id)
+    await store.appendMessage(source.id, entry("user_prompt", 1_000, { content: "analyze this" }))
+    await store.appendMessage(source.id, entry("assistant_text", 2_000, { text: "analysis done" }))
+    await store.appendMessage(source.id, entry("result", 3_000, { result: "ok", durationMs: 5 }))
+    await store.recordTurnFinished(source.id)
+    // A turn still running, which a mid-turn fork leaves behind.
+    await store.recordTurnStarted(source.id)
+    await store.appendMessage(source.id, entry("user_prompt", 4_000, { content: "now refactor it" }))
+
+    const forked = await store.forkChat(source.id, { atLastCompletedTurn: true })
+    expect(store.getChat(forked.id)?.forkedEntryCount).toBe(3)
+    await store.appendMessage(forked.id, entry("user_prompt", forked.createdAt + 1, { content: "the fork's own" }))
+    expect(store.getClientTranscript(forked.id).forkEntryCount).toBe(3)
+    // A window that starts past the boundary still says where it is.
+    expect(store.getClientTranscript(forked.id, 3).forkEntryCount).toBe(3)
+    expect(store.getClientTranscript(source.id)).not.toHaveProperty("forkEntryCount")
+
+    const reloaded = new EventStore(dataDir)
+    await reloaded.initialize()
+    expect(reloaded.getChat(forked.id)?.forkedEntryCount).toBe(3)
+
+    // A fork made before the count was recorded: what was written before the
+    // fork existed is the copy.
+    delete reloaded.state.chatsById.get(forked.id)!.forkedEntryCount
+    expect(reloaded.getClientTranscript(forked.id).forkEntryCount).toBe(3)
+  })
+
   test("a fork records where it branches off the source's session, and later turns of the source do not move it", async () => {
     const dataDir = await createTempDataDir()
     const store = new EventStore(dataDir)

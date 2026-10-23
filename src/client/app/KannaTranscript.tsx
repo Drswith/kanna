@@ -18,6 +18,8 @@ import { stripSystemMessages } from "../../shared/message-preview"
 import { InterruptedMessage } from "../components/messages/InterruptedMessage"
 import { CompactBoundaryMessage, ContextClearedMessage } from "../components/messages/CompactBoundaryMessage"
 import { CompactSummaryMessage } from "../components/messages/CompactSummaryMessage"
+import { ForkBoundary } from "../components/messages/ForkBoundary"
+import type { ForkBoundary as ForkBoundaryPosition } from "../lib/fork-boundary"
 import { StatusMessage } from "../components/messages/StatusMessage"
 import { CollapsedToolGroup } from "../components/messages/CollapsedToolGroup"
 import { foldRuns } from "../lib/fold-runs"
@@ -54,6 +56,8 @@ export interface ResolvedSingleTranscriptRow {
   nextPromptOrigin?: string
   /** On a prompt nobody typed that no result's boundary introduces: it draws its own. */
   showsOwnBoundary?: boolean
+  /** On a fork's last copied row: the "Forked from" line goes after it. */
+  forkBoundary?: ForkBoundaryMark
 }
 
 export interface ResolvedToolGroupTranscriptRow {
@@ -63,6 +67,18 @@ export interface ResolvedToolGroupTranscriptRow {
   messages: HydratedTranscriptMessage[]
   isLoading: boolean
   localPath?: string
+  /** See the single row's. */
+  forkBoundary?: ForkBoundaryMark
+}
+
+/** The source and time a "Forked from" line names. */
+export interface ForkBoundaryMark {
+  sourceChatId: string
+  at: number
+}
+
+function sameForkBoundary(left: ForkBoundaryMark | undefined, right: ForkBoundaryMark | undefined) {
+  return left?.sourceChatId === right?.sourceChatId && left?.at === right?.at
 }
 
 export type ResolvedTranscriptRow = ResolvedSingleTranscriptRow | ResolvedToolGroupTranscriptRow
@@ -478,6 +494,7 @@ function isResolvedTranscriptRowUnchanged(left: ResolvedTranscriptRow, right: Re
       && left.nextPromptTimestamp === right.nextPromptTimestamp
       && left.nextPromptOrigin === right.nextPromptOrigin
       && left.showsOwnBoundary === right.showsOwnBoundary
+      && sameForkBoundary(left.forkBoundary, right.forkBoundary)
       && sameMessage(left.message, right.message)
     )
   }
@@ -486,6 +503,7 @@ function isResolvedTranscriptRowUnchanged(left: ResolvedTranscriptRow, right: Re
     return left.startIndex === right.startIndex
       && left.isLoading === right.isLoading
       && left.localPath === right.localPath
+      && sameForkBoundary(left.forkBoundary, right.forkBoundary)
       && left.messages.length === right.messages.length
       && left.messages.every((message, index) => sameMessage(message, right.messages[index]!))
   }
@@ -548,6 +566,7 @@ interface TranscriptSingleRowProps {
   nextPromptOrigin?: string
   /** On a prompt nobody typed that no result's boundary introduces: it draws its own. */
   showsOwnBoundary?: boolean
+  forkBoundary?: ForkBoundaryMark
   onAskUserQuestionSubmit: (
     toolUseId: string,
     questions: AskUserQuestionItem[],
@@ -575,6 +594,7 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
   nextPromptTimestamp,
   nextPromptOrigin,
   showsOwnBoundary,
+  forkBoundary,
   onAskUserQuestionSubmit,
   onExitPlanModeConfirm,
 }: TranscriptSingleRowProps) {
@@ -649,7 +669,11 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
         rendered = <ToolCallMessage key={message.id} message={message} isLoading={isLoading} localPath={localPath} />
         break
       case "result":
-        rendered = hideResult ? null : <ResultMessage key={message.id} message={message} nextPromptTimestamp={nextPromptTimestamp} nextPromptOrigin={nextPromptOrigin} />
+        // The rule that closes the fork's last copied turn is the one that
+        // says where the copy ends: one line, not two stacked.
+        rendered = hideResult ? null
+          : forkBoundary && message.success ? <ForkBoundary sourceChatId={forkBoundary.sourceChatId} at={forkBoundary.at} />
+          : <ResultMessage key={message.id} message={message} nextPromptTimestamp={nextPromptTimestamp} nextPromptOrigin={nextPromptOrigin} />
         break
       case "context_window_updated":
         rendered = null
@@ -672,6 +696,11 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
     }
   }
 
+  if (forkBoundary && !(message.kind === "result" && message.success)) {
+    const line = <ForkBoundary sourceChatId={forkBoundary.sourceChatId} at={forkBoundary.at} />
+    // 20px apart, as two rows are (see `showsOwnBoundary` above).
+    rendered = rendered ? <div className="flex flex-col gap-5">{rendered}{line}</div> : line
+  }
   if (!rendered) return null
   return (
     <div
@@ -703,6 +732,7 @@ const TranscriptSingleRow = memo(function TranscriptSingleRow({
   && prev.nextPromptTimestamp === next.nextPromptTimestamp
   && prev.nextPromptOrigin === next.nextPromptOrigin
   && prev.showsOwnBoundary === next.showsOwnBoundary
+  && sameForkBoundary(prev.forkBoundary, next.forkBoundary)
   && prev.onAskUserQuestionSubmit === next.onAskUserQuestionSubmit
   && prev.onExitPlanModeConfirm === next.onExitPlanModeConfirm
   && sameMessage(prev.message, next.message)
@@ -716,6 +746,7 @@ interface TranscriptToolGroupProps {
   localPath?: string
   expanded: boolean
   onExpandedChange: (groupId: string, next: boolean) => void
+  forkBoundary?: ForkBoundaryMark
 }
 
 const TranscriptToolGroup = memo(function TranscriptToolGroup({
@@ -726,8 +757,9 @@ const TranscriptToolGroup = memo(function TranscriptToolGroup({
   localPath,
   expanded,
   onExpandedChange,
+  forkBoundary,
 }: TranscriptToolGroupProps) {
-  return (
+  const group = (
     <div
       className="group relative"
       {...{ [CHAT_SELECTION_ZONE_ATTRIBUTE]: "" }}
@@ -741,8 +773,16 @@ const TranscriptToolGroup = memo(function TranscriptToolGroup({
       />
     </div>
   )
+  if (!forkBoundary) return group
+  return (
+    <div className="flex flex-col gap-5">
+      {group}
+      <ForkBoundary sourceChatId={forkBoundary.sourceChatId} at={forkBoundary.at} />
+    </div>
+  )
 }, (prev, next) => (
   prev.id === next.id
+  && sameForkBoundary(prev.forkBoundary, next.forkBoundary)
   && prev.isLoading === next.isLoading
   && prev.localPath === next.localPath
   && prev.expanded === next.expanded
@@ -757,10 +797,13 @@ export function buildResolvedTranscriptRows(
     isLoading,
     localPath,
     latestToolIds,
+    forkBoundary,
   }: {
     isLoading: boolean
     localPath?: string
     latestToolIds: Record<string, string | null>
+    /** On a fork whose copied history is loaded: where it ends. */
+    forkBoundary?: ForkBoundaryPosition | null
     /** True when the loaded window may not include the start of the transcript. */
   }
 ): ResolvedTranscriptRow[] {
@@ -810,6 +853,18 @@ export function buildResolvedTranscriptRows(
     }
   }
 
+  if (forkBoundary) {
+    // The last row drawn from the copy carries the line. The copy's own last
+    // message may draw nothing (a turn's usage), so it is the last row that
+    // starts at or before it.
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index]!
+      if ((row.kind === "single" ? row.index : row.startIndex) > forkBoundary.afterMessageIndex) continue
+      rows[index] = { ...row, forkBoundary: { sourceChatId: forkBoundary.sourceChatId, at: forkBoundary.at } }
+      break
+    }
+  }
+
   return rows
 }
 
@@ -851,6 +906,7 @@ export const KannaTranscriptRow = memo(function KannaTranscriptRow({
         localPath={row.localPath}
         expanded={toolGroupExpanded ?? false}
         onExpandedChange={onToolGroupExpandedChange}
+        forkBoundary={row.forkBoundary}
       />
     )
   }
@@ -875,6 +931,7 @@ export const KannaTranscriptRow = memo(function KannaTranscriptRow({
       nextPromptTimestamp={row.nextPromptTimestamp}
       nextPromptOrigin={row.nextPromptOrigin}
       showsOwnBoundary={row.showsOwnBoundary}
+      forkBoundary={row.forkBoundary}
       onAskUserQuestionSubmit={onAskUserQuestionSubmit}
       onExitPlanModeConfirm={onExitPlanModeConfirm}
     />
@@ -889,6 +946,7 @@ export const KannaTranscriptRow = memo(function KannaTranscriptRow({
   if (prev.onExitPlanModeConfirm !== next.onExitPlanModeConfirm) return false
   if (prev.row.kind !== next.row.kind) return false
   if (prev.row.id !== next.row.id) return false
+  if (!sameForkBoundary(prev.row.forkBoundary, next.row.forkBoundary)) return false
 
   if (prev.row.kind === "tool-group" && next.row.kind === "tool-group") {
     const previousRow = prev.row

@@ -445,7 +445,7 @@ export function deriveChatSnapshot(
   activeStatuses: Map<string, KannaStatus>,
   drainingChatIds: Set<string>,
   chatId: string,
-  getMessages: (chatId: string) => Pick<ChatSnapshot, "messages" | "startIndex" | "readAnchor"> & { outline?: TranscriptOutlineEntry[] },
+  getMessages: (chatId: string) => Pick<ChatSnapshot, "messages" | "startIndex" | "readAnchor"> & { outline?: TranscriptOutlineEntry[]; forkEntryCount?: number },
   subagents?: readonly SubagentActivity[],
   /** What the chat is waiting on, when it is. See `WaitingOn`. */
   waitingOn?: WaitingOn
@@ -484,6 +484,12 @@ export function deriveChatSnapshot(
   }
 
   const transcript = getMessages(chat.id)
+  // Recorded on the fork, or derived from its transcript for an older one
+  // (`EventStore.forkEntryCountField`).
+  const forkEntryCount = transcript.forkEntryCount ?? chat.forkedEntryCount
+  if (chat.forkedFromChatId && forkEntryCount != null) {
+    runtime.forkedFrom = { chatId: chat.forkedFromChatId, at: chat.createdAt, entryCount: forkEntryCount }
+  }
 
   return {
     runtime,

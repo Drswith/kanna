@@ -12,6 +12,7 @@ import { useEffectiveEditorPreset } from "../components/open-external-menu"
 import { useChatInputStore } from "../stores/chatInputStore"
 import { generateUUID } from "../lib/utils"
 import { resolveProjectNewChat } from "../lib/new-chat-resume"
+import { resolveForkBoundary, type ForkBoundary } from "../lib/fork-boundary"
 import { flattenSidebarThreads } from "../lib/thread-sections"
 import { useDelegateStore } from "../stores/delegateStore"
 import {
@@ -185,6 +186,8 @@ export interface KannaState {
   hasOlderMessages: boolean
   /** Every user prompt in the chat, loaded or not (see shared/transcript-window.ts). */
   transcriptOutline: TranscriptOutlineEntry[]
+  /** On a fork whose copied history is loaded: where it ends. */
+  forkBoundary: ForkBoundary | null
   /** Widen the window toward the start; the rows arrive on the subscription. */
   loadOlderMessages: (options?: { untilMessageId?: string; all?: boolean }) => Promise<void>
   isLoadingOlderMessages: boolean
@@ -780,6 +783,12 @@ export function useKannaState(activeChatId: string | null): KannaState {
   const previousPrompt = useMemo(() => getPreviousPrompt(messages), [messages])
   const latestToolIds = useMemo(() => getLatestToolIds(messages), [messages])
   const runtime = activeChatSnapshot?.runtime ?? null
+  const forkBoundary = useMemo(
+    () => (activeChatSnapshot
+      ? resolveForkBoundary(activeChatSnapshot.runtime.forkedFrom, activeChatSnapshot.messages, activeChatSnapshot.startIndex, messages)
+      : null),
+    [activeChatSnapshot, messages],
+  )
   const queuedMessages = activeChatSnapshot?.queuedMessages ?? EMPTY_QUEUED_MESSAGES
   const optimisticRuntimeStatus = optimisticProcessing?.scopeId === optimisticScopeId && (!runtime || hasNoTurnStatus(runtime.status))
     ? "starting"
@@ -1339,6 +1348,7 @@ export function useKannaState(activeChatId: string | null): KannaState {
       ?? (cachedTranscript?.chatId === activeChatId ? cachedTranscript.startIndex : 0)
     ) > 0,
     transcriptOutline: activeChatSnapshot?.outline ?? EMPTY_OUTLINE,
+    forkBoundary,
     loadOlderMessages,
     isLoadingOlderMessages,
     chatDiffSnapshot,

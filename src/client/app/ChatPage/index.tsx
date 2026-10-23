@@ -1373,6 +1373,7 @@ export function ChatPage() {
           onJumpRequestHandled={onJumpRequestHandled}
           hasOlderMessages={state.hasOlderMessages}
           transcriptOutline={state.transcriptOutline}
+          forkBoundary={state.forkBoundary}
           onLoadOlderMessages={state.loadOlderMessages}
           isLoadingOlderMessages={state.isLoadingOlderMessages}
           scrollToBottom={scrollToTranscriptEnd}

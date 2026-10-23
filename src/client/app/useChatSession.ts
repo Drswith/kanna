@@ -4,6 +4,7 @@ import type { ChatSnapshot, HydratedTranscriptMessage, ProviderCatalogEntry, Tra
 import { DEFAULT_TRANSCRIPT_WINDOW_ASSISTANT_MESSAGES } from "../../shared/transcript-window"
 import { useAppDialog } from "../components/ui/app-dialog"
 import { processTranscriptMessages } from "../lib/parseTranscript"
+import { resolveForkBoundary } from "../lib/fork-boundary"
 import { useAppSettingsStore } from "../stores/appSettingsStore"
 import { findSidebarChat, useSidebarChatStatus } from "../stores/sidebarStore"
 import {
@@ -200,6 +201,10 @@ export function useChatSession({ socket, chatId, fallbackProviders }: {
   const latestToolIds = useMemo(() => getLatestToolIds(messages), [messages])
 
   const runtime = snapshot?.runtime ?? null
+  const forkBoundary = useMemo(
+    () => (snapshot ? resolveForkBoundary(snapshot.runtime.forkedFrom, snapshot.messages, snapshot.startIndex, messages) : null),
+    [snapshot, messages],
+  )
   const optimisticRuntimeStatus = optimisticProcessing && (!runtime || hasNoTurnStatus(runtime.status)) ? "starting" : null
   // Until the chat's own snapshot lands, the sidebar's word for it.
   const sidebarStatus = useSidebarChatStatus(chatId)
@@ -309,6 +314,7 @@ export function useChatSession({ socket, chatId, fallbackProviders }: {
     reportReadAnchor,
     hasOlderMessages: (snapshot?.startIndex ?? (cachedTranscript?.chatId === chatId ? cachedTranscript.startIndex : 0)) > 0,
     transcriptOutline: snapshot?.outline ?? EMPTY_OUTLINE,
+    forkBoundary,
     loadOlderMessages,
     isLoadingOlderMessages,
     handleSend,

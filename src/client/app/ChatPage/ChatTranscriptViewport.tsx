@@ -11,6 +11,7 @@ import { ArrowDown, Flower, Upload } from "lucide-react"
 import { DrainingIndicator } from "../../components/messages/DrainingIndicator"
 import { QueuedUserMessage } from "../../components/messages/QueuedUserMessage"
 import { messageNamingParent, ParentChatLink } from "../../components/messages/ParentChatLink"
+import type { ForkBoundary } from "../../lib/fork-boundary"
 import { ReplyQuoteProjectContext } from "../../components/messages/ChatToolMessage"
 import { TRANSCRIPT_ROW_CLASS } from "../../components/messages/transcript-row"
 import { useParentChatId, useProjectIdForChat } from "../../stores/sidebarStore"
@@ -308,6 +309,8 @@ interface ChatTranscriptViewportProps {
    */
   hasOlderMessages?: boolean
   transcriptOutline?: TranscriptOutlineEntry[]
+  /** On a fork whose copied history is loaded: where the "Forked from" line goes. */
+  forkBoundary?: ForkBoundary | null
   onLoadOlderMessages?: (options?: { untilMessageId?: string; all?: boolean }) => Promise<void>
   isLoadingOlderMessages?: boolean
   /**
@@ -501,6 +504,7 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
   onJumpRequestHandled,
   hasOlderMessages = false,
   transcriptOutline,
+  forkBoundary = null,
   onLoadOlderMessages,
   isLoadingOlderMessages = false,
   scrollbarGutterHostRef,
@@ -529,7 +533,8 @@ const TranscriptScrollerBody = memo(function TranscriptScrollerBody({
     isLoading: isProcessing,
     localPath: localPath ?? undefined,
     latestToolIds,
-  }), [isProcessing, latestToolIds, localPath, messages])
+    forkBoundary,
+  }), [forkBoundary, isProcessing, latestToolIds, localPath, messages])
   const resolvedRows = useStableResolvedRows(rawRows)
 
   useEffect(() => {

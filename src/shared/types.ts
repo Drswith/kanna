@@ -2645,6 +2645,25 @@ export interface ChatRuntime {
   delegator?: true
   /** With `status: "waiting_on_subagent"`, and only then. The same value as `SidebarChatRow.waitingOn`. */
   waitingOn?: WaitingOn
+  /**
+   * Set on a fork: the chat it was copied from, and where the copy ends, so
+   * the transcript can draw "Forked from …" there. The source's title, and
+   * whether it still exists, are the sidebar's to give, as for `parentChatId`.
+   */
+  forkedFrom?: ChatForkOrigin
+}
+
+export interface ChatForkOrigin {
+  /** The chat this one was forked from: its direct source, for a fork of a fork. */
+  chatId: string
+  /** When the fork was made. Epoch ms. */
+  at: number
+  /**
+   * How many transcript entries were copied from the source. The fork's own
+   * history starts at this absolute index, so the boundary sits between
+   * entry `entryCount - 1` and entry `entryCount`.
+   */
+  entryCount: number
 }
 
 export interface ChatSnapshot {

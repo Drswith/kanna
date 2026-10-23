@@ -1,4 +1,6 @@
+import type { ReactNode } from "react"
 import type { MessageSource } from "../../../shared/types"
+import { cn } from "../../lib/utils"
 import type { ProcessedResultMessage } from "./types"
 import { MetaRow, MetaLabel } from "./shared"
 
@@ -32,11 +34,11 @@ export function formatPromptBoundary(timestamp: string, origin?: string): string
  * the prompt that opens the next, so a prompt nobody typed is attributed
  * here, on the line that introduces it.
  */
-export function TimeBoundary({ label }: { label: string }) {
+export function TimeBoundary({ label, labelClassName }: { label: ReactNode; labelClassName?: string }) {
   return (
     <MetaRow className="px-0.5 text-xs tracking-wide">
       <div className="w-full h-[1px] bg-border/70"></div>
-      <MetaLabel className="whitespace-nowrap text-[12px] tracking-wide text-muted-foreground/60 flex-shrink-0">{label}</MetaLabel>
+      <MetaLabel className={cn("whitespace-nowrap text-[12px] tracking-wide text-muted-foreground/60 flex-shrink-0", labelClassName)}>{label}</MetaLabel>
       <div className="w-full h-[1px] bg-border/70"></div>
     </MetaRow>
   )
