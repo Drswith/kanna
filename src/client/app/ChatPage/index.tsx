@@ -36,9 +36,7 @@ import { shouldOpenLocalFileLinkInEditor } from "../../lib/pathUtils"
 import { openViewer, useChatViewer, useViewerStore, viewerWidthClass } from "../../stores/viewerStore"
 import type { ChatPreviewContext } from "./ChatPreview"
 import { useOpenChat } from "../useOpenChat"
-import { useNewChatDelegate } from "./useNewChatDelegate"
 import { useDelegateStore } from "../../stores/delegateStore"
-import { useAppDialog } from "../../components/ui/app-dialog"
 import type { DiffViewerContext } from "../../components/chat-ui/git/DiffViewer"
 import { useChatExists, useChatIsDelegator, useProjectRepoUrl, useSidebarChatIsNew } from "../../stores/sidebarStore"
 import { useAppSettingsStore } from "../../stores/appSettingsStore"
@@ -1010,36 +1008,14 @@ export function ChatPage() {
     transcriptListRef.current?.scrollToEnd()
   }, [clearShowScrollTimeout])
 
-  // The new chat page can send to one of the project's delegators instead of
-  // starting a chat. Only there: a chat with messages sends to itself.
-  const appDialog = useAppDialog()
-  const { delegate: composerDelegate, sendToDelegator } = useNewChatDelegate({
-    // Not on a delegator's own empty page: what is typed there is for it.
-    // Nor on a page whose chat is still loading, where the empty state is
-    // only being held over from the last page. A chat known to be new (see
-    // `showEmptyState`) has the control in its composer from its first frame.
-    enabled: showEmptyState && (!isChatLoading || isKnownNewChat) && !isDelegator,
-    projectId,
-    socket: state.socket,
-    dialog: appDialog,
-  })
-  const delegateTargetChatId = composerDelegate?.target?.chatId ?? null
-
   const handleChatSubmit = useCallback(async (
     content: string,
     options?: Parameters<typeof state.handleSend>[1],
   ) => {
     // No scroll here: the transcript pins the new prompt to the top of the
     // viewport once it renders (see ChatTranscriptViewport's pin effect).
-    //
-    // From the new chat page with delegating on, the message is not for this
-    // chat at all: it goes to the delegator, and the app goes with it.
-    if (delegateTargetChatId) {
-      await sendToDelegator(delegateTargetChatId, content, options)
-      return
-    }
     await state.handleSend(content, options)
-  }, [delegateTargetChatId, sendToDelegator, state.handleSend])
+  }, [state.handleSend])
 
   const handleListSkills = useCallback(
     (provider: AgentProvider) =>
@@ -1412,7 +1388,6 @@ export function ChatPage() {
         onCancel={handleCancel}
         onEditModels={handleEditModels}
         onListSkills={handleListSkills}
-        delegate={composerDelegate}
       />
       <DefaultModelsDialog
         open={defaultModelsDialogOpen}

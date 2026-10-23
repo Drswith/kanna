@@ -1,16 +1,11 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { DelegatePreference } from "../lib/delegators"
 
 /**
- * What this browser remembers about delegating. Per project, what the new
- * chat page's delegate control was last set to: whether delegating is on
- * there, and which delegator it last sent to (`resolveDelegateTarget` says
- * what that means). Per delegator, whether its list has been shown yet.
+ * What this browser remembers about delegators: whether each one's list has
+ * been shown yet, and when each was last opened.
  */
 interface DelegateState {
-  projects: Record<string, DelegatePreference>
-  setPreference: (projectId: string, preference: DelegatePreference) => void
   /**
    * The delegators whose page has shown its list in the pane once. The list
    * is there by default the first time a delegator is opened; from then on
@@ -31,12 +26,6 @@ interface DelegateState {
 export const useDelegateStore = create<DelegateState>()(
   persist(
     (set) => ({
-      projects: {},
-      setPreference: (projectId, preference) => set((state) => {
-        const current = state.projects[projectId]
-        if (current?.on === preference.on && current?.chatId === preference.chatId) return state
-        return { projects: { ...state.projects, [projectId]: preference } }
-      }),
       paneShown: {},
       markPaneShown: (chatId) => set((state) => (
         state.paneShown[chatId] ? state : { paneShown: { ...state.paneShown, [chatId]: true } }
@@ -44,6 +33,15 @@ export const useDelegateStore = create<DelegateState>()(
       viewedAt: {},
       markViewed: (chatId) => set((state) => ({ viewedAt: { ...state.viewedAt, [chatId]: Date.now() } })),
     }),
-    { name: "delegate-preferences", version: 1 },
+    {
+      name: "delegate-preferences",
+      // Version 1 also kept, per project, where the new chat page's delegate
+      // control sent a message. That control is gone.
+      version: 2,
+      migrate: (persisted) => {
+        const { projects: _projects, ...rest } = (persisted ?? {}) as Record<string, unknown>
+        return rest as unknown as DelegateState
+      },
+    },
   ),
 )

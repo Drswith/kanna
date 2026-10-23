@@ -61,8 +61,8 @@ export function hasNewChatDraft(drafts: NewChatDrafts, chatId: string): boolean 
  *
  * With several drafts, the one changed most recently.
  *
- * A project with a delegator opens that instead, which is what its new chat
- * page would send to anyway. A delegator here is one the lists show: not
+ * A project with a delegator opens that instead: it is the project's way in.
+ * A delegator here is one the lists show: not
  * archived, and not a sub-chat another chat's agent made, which is that
  * chat's and not the project's way in. Of several, the one last opened in
  * this browser, and failing that the most recently active. A new chat's

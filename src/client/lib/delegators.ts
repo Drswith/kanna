@@ -4,9 +4,8 @@ import type { SidebarThread } from "./thread-sections"
 /**
  * Delegators on the client: a chat whose job is to hand work to the chats
  * under it (`SidebarChatRow.delegator`). The rules that are not drawing:
- * which of a project's delegators the new chat page sends to, which chats a
- * delegator's list holds, and how many of them want the user. React-free for
- * tests.
+ * a project's delegators, which chats a delegator's list holds, and how many
+ * of them want the user. React-free for tests.
  */
 
 /**
@@ -19,34 +18,6 @@ export function projectDelegators(threads: readonly SidebarThread[], projectId: 
   return threads
     .filter((thread) => thread.projectId === projectId && Boolean(thread.row.delegator) && !thread.archived)
     .sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.chatId.localeCompare(right.chatId))
-}
-
-/** What this browser remembers of the delegate control, per project. */
-export interface DelegatePreference {
-  /** False once delegating was turned off here. Absent means never touched. */
-  on?: boolean
-  /** The delegator last sent to or picked. */
-  chatId?: string
-}
-
-/**
- * The delegator a message typed on the new chat page goes to, or null when it
- * starts an ordinary chat.
- *
- * Delegating is on whenever the project has a delegator, until it is turned
- * off for that project: someone who made a delegator made it to be the way
- * in, and a control that had to be switched on each time would be forgotten.
- * The one used last is the one used next, while it still exists; otherwise
- * the most recently active.
- *
- * `delegators` is `projectDelegators`' list, most recently active first.
- */
-export function resolveDelegateTarget(
-  delegators: readonly SidebarThread[],
-  preference: DelegatePreference | undefined,
-): SidebarThread | null {
-  if (delegators.length === 0 || preference?.on === false) return null
-  return delegators.find((thread) => thread.chatId === preference?.chatId) ?? delegators[0]!
 }
 
 /**
@@ -94,11 +65,6 @@ export function delegatedAttentionCount(
 /** A delegator that has not been named: the server calls every chat "New Chat" until its first message does. */
 export function isUnnamedDelegator(title: string): boolean {
   return title.trim() === "" || title === "New Chat"
-}
-
-/** What a new, still unnamed delegator is called in the control: the server's "New Chat" would read as no delegator at all. */
-export function delegatorDisplayTitle(title: string): string {
-  return isUnnamedDelegator(title) ? "New delegator" : title
 }
 
 /**

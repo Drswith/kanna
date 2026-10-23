@@ -1,6 +1,5 @@
 import { memo, type RefObject } from "react"
 import { ChatInput, type ChatInputHandle } from "../../components/chat-ui/ChatInput"
-import type { ComposerDelegate } from "../../components/chat-ui/DelegateControl"
 import type { ContextWindowSnapshot } from "../../lib/contextWindow"
 import type { KannaState } from "../useKannaState"
 import type { AgentProvider, ChatSkillsSnapshot } from "../../../shared/types"
@@ -28,8 +27,6 @@ interface ChatInputDockProps {
   /** See `ChatInput`: the previewed chat's composer passes both. */
   placeholder?: string
   secondary?: boolean
-  /** See `ChatInput`: the new chat page's delegate control and target. */
-  delegate?: ComposerDelegate
 }
 
 export const ChatInputDock = memo(function ChatInputDock({
@@ -54,7 +51,6 @@ export const ChatInputDock = memo(function ChatInputDock({
   onListSkills,
   placeholder,
   secondary,
-  delegate,
 }: ChatInputDockProps) {
   return (
     <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none">
@@ -90,7 +86,6 @@ export const ChatInputDock = memo(function ChatInputDock({
             onListSkills={onListSkills}
             placeholder={placeholder}
             secondary={secondary}
-            delegate={delegate}
           />
         </div>
       </div>

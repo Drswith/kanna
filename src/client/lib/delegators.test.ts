@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { SidebarChatRow } from "../../shared/types"
-import { delegatedAttentionCount, delegatedListTitle, delegatedThreads, delegatorDisplayTitle, projectDelegators, resolveDelegateTarget } from "./delegators"
+import { delegatedAttentionCount, delegatedListTitle, delegatedThreads, projectDelegators } from "./delegators"
 import type { SidebarThread } from "./thread-sections"
 
 function thread(chatId: string, row: Partial<SidebarChatRow> = {}, extra: Partial<SidebarThread> = {}): SidebarThread {
@@ -30,33 +30,6 @@ describe("projectDelegators", () => {
   test("archived delegators are not offered, and no project has none", () => {
     expect(projectDelegators([delegator("put-away", 3, { archived: true })], "p1")).toEqual([])
     expect(projectDelegators([delegator("a", 1)], null)).toEqual([])
-  })
-})
-
-describe("resolveDelegateTarget", () => {
-  const delegators = [delegator("recent", 9), delegator("older", 2)]
-
-  test("off when the project has no delegator", () => {
-    expect(resolveDelegateTarget([], undefined)).toBeNull()
-    expect(resolveDelegateTarget([], { on: true, chatId: "gone" })).toBeNull()
-  })
-
-  test("on by default, to the most recently active", () => {
-    expect(resolveDelegateTarget(delegators, undefined)?.chatId).toBe("recent")
-    expect(resolveDelegateTarget(delegators, {})?.chatId).toBe("recent")
-  })
-
-  test("the one used last is the one used next", () => {
-    expect(resolveDelegateTarget(delegators, { chatId: "older" })?.chatId).toBe("older")
-    expect(resolveDelegateTarget(delegators, { on: true, chatId: "older" })?.chatId).toBe("older")
-  })
-
-  test("a remembered delegator that is gone falls back to the most recently active", () => {
-    expect(resolveDelegateTarget(delegators, { on: true, chatId: "deleted" })?.chatId).toBe("recent")
-  })
-
-  test("turned off stays off, whichever was last used", () => {
-    expect(resolveDelegateTarget(delegators, { on: false, chatId: "older" })).toBeNull()
   })
 })
 
@@ -91,13 +64,6 @@ describe("delegatedAttentionCount", () => {
 
   test("only this delegator's chats", () => {
     expect(delegatedAttentionCount([row({ status: "waiting_for_user", parentChatId: "other" })], "deleg")).toBe(0)
-  })
-})
-
-describe("delegatorDisplayTitle", () => {
-  test("an unnamed one is called a new delegator", () => {
-    expect(delegatorDisplayTitle("New Chat")).toBe("New delegator")
-    expect(delegatorDisplayTitle("Ship 0.83")).toBe("Ship 0.83")
   })
 })
 

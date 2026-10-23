@@ -74,8 +74,6 @@ import { useTerminalLayoutStore } from "../../stores/terminalLayoutStore"
 import { useTerminalPreferencesStore } from "../../stores/terminalPreferencesStore"
 import { useChatViewer, useViewerStore } from "../../stores/viewerStore"
 import { useSidebarViewStore } from "../../stores/sidebarViewStore"
-import { useDelegateStore } from "../../stores/delegateStore"
-import { delegatorDisplayTitle, projectDelegators, resolveDelegateTarget } from "../../lib/delegators"
 import { macSetup, macSetupAvailable, useMacSetupStore } from "../../lib/macApp"
 import { playChatNotificationSound } from "../../lib/chatSounds"
 import { useChatSoundPreferencesStore } from "../../stores/chatSoundPreferencesStore"
@@ -357,14 +355,6 @@ export function CommandPalette({ state }: { state: KannaState }) {
     [sidebarData]
   )
   const settingsEntries = useMemo(() => getSettingsPaletteEntries(), [])
-  // The current project's delegators and which one the new chat page's
-  // delegate control sends to (useNewChatDelegate), for "Delegate to …".
-  const projectDelegatorThreads = useMemo(
-    () => projectDelegators(threads, state.activeProjectId),
-    [state.activeProjectId, threads]
-  )
-  const delegatePreference = useDelegateStore((store) => (state.activeProjectId ? store.projects[state.activeProjectId] : undefined))
-  const delegateTargetId = resolveDelegateTarget(projectDelegatorThreads, delegatePreference)?.chatId ?? null
 
   const close = useCallback(() => setOpen(false), [])
 
@@ -614,10 +604,9 @@ export function CommandPalette({ state }: { state: KannaState }) {
         // root already offers "New Chat in <current>").
         run: () => pushPage({ page: "project-chats" }),
       })
-      // How a project gets its first delegator: the new chat page's delegate
-      // control, which holds "New Delegator…", is there only once it has one.
-      // Found by typing, as on iOS, so the palette at rest does not offer it
-      // to every project.
+      // Found by typing, as on iOS, so the palette at rest does not offer
+      // it to every project. The new delegator opens once it is made: an
+      // empty chat whose page is where its first message is written.
       list.push({
         id: "new-delegator-current",
         title: currentProjectTitle ? `New Delegator in ${currentProjectTitle}…` : "New Delegator…",
@@ -626,43 +615,11 @@ export function CommandPalette({ state }: { state: KannaState }) {
         searchOnly: true,
         run: () => {
           close()
-          void createDelegator({ projectId, socket: state.socket, dialog })
+          void createDelegator({ projectId, socket: state.socket, dialog }).then((chatId) => {
+            if (chatId) navigate(`/chat/${chatId}`)
+          })
         },
       })
-      // The new chat page's delegate control: where a message typed there
-      // goes. Saved per project, as the control saves it, so it holds for the
-      // project's next new chat wherever it is picked from.
-      if (projectDelegatorThreads.length > 0) {
-        for (const delegator of projectDelegatorThreads) {
-          const title = delegatorDisplayTitle(delegator.title)
-          list.push({
-            id: `delegate-to-${delegator.chatId}`,
-            title: `Delegate to ${title}`,
-            keywords: ["delegate", "delegator", "delegation", "hand off", "send to", title],
-            icon: <DelegatorIcon className={ICON_CLASS} />,
-            hint: delegator.chatId === delegateTargetId ? "Current delegator" : "New chats",
-            searchOnly: true,
-            run: () => {
-              close()
-              useDelegateStore.getState().setPreference(projectId, { on: true, chatId: delegator.chatId })
-            },
-          })
-        }
-        list.push({
-          id: "dont-delegate",
-          title: "Don't Delegate",
-          keywords: ["delegate", "delegator", "stop delegating", "no delegator", "new chat", "off"],
-          icon: <SquarePen className={ICON_CLASS} />,
-          hint: delegateTargetId ? "New chats" : "Current",
-          searchOnly: true,
-          run: () => {
-            close()
-            // Keeps which one was last used, for turning it back on (useNewChatDelegate).
-            const store = useDelegateStore.getState()
-            store.setPreference(projectId, { on: false, chatId: store.projects[projectId]?.chatId })
-          },
-        })
-      }
     }
 
     // Focus mode narrows the sidebar to the current project. The exit variant
@@ -1201,8 +1158,6 @@ export function CommandPalette({ state }: { state: KannaState }) {
     runSettingsEffect,
     sidebarView,
     isPhoneLayout,
-    projectDelegatorThreads,
-    delegateTargetId,
     widgetsChatKey,
     widgetsOpen,
     state.activeChatId,
