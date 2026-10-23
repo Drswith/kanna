@@ -8,6 +8,7 @@ import {
   buildConcurrentAgentsNotice,
   buildPromptText,
   buildSteeredMessageContent,
+  claudeSystemPrompt,
   claudeToolset,
   formatQuestionAnswersFollowUp,
   maxClaudeContextWindowFromModelUsage,
@@ -3698,5 +3699,228 @@ describe("waiting on a subagent", () => {
 
     await agent.stopBackgroundTask("chat-1", "agent-thread-1")
     expect(stopped).toEqual(["agent-thread-1"])
+  })
+})
+
+describe("a chat made a delegator, or an ordinary chat again, mid-conversation", () => {
+  test("claude: the system prompt is rendered at each launch, so a resumed session hears a flip", () => {
+    // The CLI's default records the first launch's prompt and resends it on
+    // every resume; a restart would change nothing.
+    expect(claudeSystemPrompt("claude-opus-4-1", true)).toMatchObject({ type: "preset", preset: "claude_code", snapshot: false })
+    expect(claudeSystemPrompt("claude-opus-4-1", true).append).toContain("# This chat is a delegator")
+    expect(claudeSystemPrompt("claude-opus-4-1", false).append).not.toContain("# This chat is a delegator")
+    expect(claudeSystemPrompt("claude-opus-4-1", false).append).toContain("# Kanna chats")
+  })
+
+  function setDelegator(store: ReturnType<typeof createFakeStore>, on: boolean) {
+    const chat = store.chat as { delegator?: true }
+    if (on) chat.delegator = true
+    else delete chat.delegator
+  }
+
+  for (const provider of ["codex", "cursor", "pi"] as const) {
+    test(`${provider}: each turn carries the flag as it is when the turn starts, and resumes the same session`, async () => {
+      const turns: Array<{ delegator?: boolean; content: string; sessionToken: string | null | undefined }> = []
+      const interrupts: number[] = []
+      let codexSessionToken: string | null | undefined
+      let stream = new AsyncEventQueue<any>()
+      const manager = {
+        async startSession(args: { sessionToken: string | null }) {
+          codexSessionToken = args.sessionToken
+          return { sessionToken: "session-1" }
+        },
+        async startTurn(args: { delegator?: boolean; content: string; sessionToken?: string | null }): Promise<HarnessTurn> {
+          const index = turns.push({
+            delegator: args.delegator,
+            content: args.content,
+            sessionToken: provider === "codex" ? codexSessionToken : args.sessionToken,
+          }) - 1
+          const events = new AsyncEventQueue<any>()
+          stream = events
+          return {
+            provider,
+            stream: events,
+            interrupt: async () => { interrupts.push(index); events.close() },
+            close: () => events.close(),
+          }
+        },
+        stopAll() {},
+        dispose() {},
+      }
+      const store = createFakeStore()
+      const coordinator = new AgentCoordinator({
+        store: store as never,
+        onStateChange: () => {},
+        codexManager: manager as never,
+        cursorManager: manager as never,
+        piManager: manager as never,
+        resolvePiConnection: async () => ({ provider: "openai", baseUrl: "https://example.invalid", apiKey: "test" }),
+        generateTitle: async () => ({ title: "Flip", usedFallback: false, failureMessage: null }),
+      })
+      const send = (content: string) => coordinator.send({ type: "chat.send", chatId: "chat-1", provider, content, model: "test-model" })
+      const finish = async (count: number) => {
+        stream.push({ type: "session_token", sessionToken: "session-1" })
+        stream.push({ type: "transcript", entry: timestamped({ kind: "result", subtype: "success", isError: false, durationMs: 0, result: "done" }) })
+        stream.close()
+        await waitFor(() => store.turnFinishedCount === count)
+      }
+      // Cursor has no system prompt hook, so the instructions ride its turn text.
+      const toldDelegator = (index: number) => provider === "cursor"
+        ? turns[index]!.content.includes("# This chat is a delegator")
+        : turns[index]!.delegator
+
+      // Between turns.
+      await send("one")
+      await finish(1)
+      setDelegator(store, true)
+      await send("two")
+      await finish(2)
+
+      // During a turn: it runs on as it started, and the next turn has the change.
+      await send("three")
+      setDelegator(store, false)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(turns).toHaveLength(3)
+      expect(interrupts).toEqual([])
+      expect(coordinator.isBusy("chat-1")).toBe(true)
+      await finish(3)
+      await send("four")
+
+      // A message queued behind a turn, after a flip during it.
+      setDelegator(store, true)
+      await coordinator.enqueue({ type: "message.enqueue", chatId: "chat-1", content: "five" })
+      await finish(4)
+      await waitFor(() => turns.length === 5)
+
+      // A steer after a flip.
+      setDelegator(store, false)
+      await coordinator.enqueue({ type: "message.enqueue", chatId: "chat-1", content: "six", steer: true })
+      expect(interrupts).toEqual([4])
+      await finish(5)
+
+      expect(turns.map((_, index) => toldDelegator(index))).toEqual([false, true, true, false, true, false])
+      expect(turns.map((turn) => turn.sessionToken)).toEqual([null, "session-1", "session-1", "session-1", "session-1", "session-1"])
+      coordinator.dispose()
+    })
+  }
+
+  test("claude: a flip during a turn leaves the session alone, and the queued turn after it restarts and resumes", async () => {
+    const queues: AsyncEventQueue<any>[] = []
+    const promptIds: string[][] = []
+    const starts: Array<{ delegator?: boolean; sessionToken: string | null }> = []
+    const interrupts: number[] = []
+    const store = createFakeStore()
+    const coordinator = new AgentCoordinator({
+      store: store as never,
+      onStateChange: () => {},
+      startClaudeSession: async (args) => {
+        starts.push({ delegator: args.delegator, sessionToken: args.sessionToken })
+        const events = new AsyncEventQueue<any>()
+        const index = queues.push(events) - 1
+        promptIds.push([])
+        return {
+          provider: "claude",
+          echoesPromptIds: true,
+          stream: events,
+          getAccountInfo: async () => null,
+          interrupt: async () => { interrupts.push(index) },
+          close: () => events.close(),
+          setModel: async () => {},
+          setPermissionMode: async () => {},
+          sendPrompt: async (_content: string, promptId?: string) => { promptIds[index]!.push(promptId!) },
+        }
+      },
+    })
+    const result = (index: number, prompt: number) => queues[index]!.push({
+      type: "transcript",
+      entry: timestamped({ kind: "result", subtype: "success", isError: false, durationMs: 0, result: "done" }),
+      promptIds: [promptIds[index]![prompt]],
+    })
+
+    await coordinator.send({ type: "chat.send", chatId: "chat-1", provider: "claude", content: "one", model: "claude-opus-4-1" })
+    queues[0]!.push({ type: "session_token", sessionToken: "claude-session-1" })
+    await waitFor(() => store.chat.sessionToken === "claude-session-1")
+
+    setDelegator(store, true)
+    await coordinator.enqueue({ type: "message.enqueue", chatId: "chat-1", content: "two" })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(starts).toHaveLength(1)
+    expect(interrupts).toEqual([])
+    expect(coordinator.isBusy("chat-1")).toBe(true)
+
+    result(0, 0)
+    await waitFor(() => starts.length === 2)
+    expect(starts).toEqual([
+      { delegator: false, sessionToken: null },
+      { delegator: true, sessionToken: "claude-session-1" },
+    ])
+    result(1, 0)
+    await waitFor(() => store.turnFinishedCount === 2)
+    coordinator.dispose()
+  })
+
+  test("claude: a steer after a flip restarts the session, and the old session's late result does not end the new turn", async () => {
+    const queues: AsyncEventQueue<any>[] = []
+    const promptIds: string[][] = []
+    const starts: Array<{ delegator?: boolean; sessionToken: string | null }> = []
+    const store = createFakeStore()
+    let failures = 0
+    ;(store as { recordTurnFailed: () => Promise<void> }).recordTurnFailed = async () => { failures += 1 }
+    const coordinator = new AgentCoordinator({
+      store: store as never,
+      onStateChange: () => {},
+      startClaudeSession: async (args) => {
+        starts.push({ delegator: args.delegator, sessionToken: args.sessionToken })
+        const events = new AsyncEventQueue<any>()
+        const index = queues.push(events) - 1
+        promptIds.push([])
+        return {
+          provider: "claude",
+          echoesPromptIds: true,
+          stream: events,
+          getAccountInfo: async () => null,
+          interrupt: async () => {},
+          // The CLI takes a while to exit, so the old stream ends later (below).
+          close: () => {},
+          setModel: async () => {},
+          setPermissionMode: async () => {},
+          sendPrompt: async (_content: string, promptId?: string) => { promptIds[index]!.push(promptId!) },
+        }
+      },
+    })
+
+    // A fresh session, so its first prompt and its replacement's share a seq.
+    await coordinator.send({ type: "chat.send", chatId: "chat-1", provider: "claude", content: "one", model: "claude-opus-4-1" })
+    queues[0]!.push({ type: "session_token", sessionToken: "claude-session-1" })
+    await waitFor(() => store.chat.sessionToken === "claude-session-1")
+
+    setDelegator(store, true)
+    await coordinator.enqueue({ type: "message.enqueue", chatId: "chat-1", content: "two", steer: true })
+    expect(starts).toEqual([
+      { delegator: false, sessionToken: null },
+      { delegator: true, sessionToken: "claude-session-1" },
+    ])
+    expect(coordinator.isBusy("chat-1")).toBe(true)
+
+    // The old CLI answers the prompt the steer cancelled, then exits.
+    queues[0]!.push({
+      type: "transcript",
+      entry: timestamped({ kind: "result", subtype: "error", isError: true, durationMs: 0, result: "" }),
+      promptIds: [promptIds[0]![0]],
+    })
+    queues[0]!.close()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(failures).toBe(0)
+    expect(coordinator.isBusy("chat-1")).toBe(true)
+
+    queues[1]!.push({
+      type: "transcript",
+      entry: timestamped({ kind: "result", subtype: "success", isError: false, durationMs: 0, result: "done" }),
+      promptIds: [promptIds[1]![0]],
+    })
+    await waitFor(() => store.turnFinishedCount === 1)
+    expect(coordinator.isBusy("chat-1")).toBe(false)
+    queues[1]!.close()
+    coordinator.dispose()
   })
 })

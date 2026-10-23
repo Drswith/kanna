@@ -1811,6 +1811,38 @@ describe("delegators", () => {
     expect(codex.turn(other).delegator).toBe(true)
   })
 
+  test("a flip during a turn changes what Kanna enforces from the next turn, with what the agent is told", async () => {
+    const context = await setup()
+    const { orchestrator, store, codex, userChat, agent } = context
+    const root = await delegatorChat(context)
+    const other = await userChat("something else")
+    const target = await userChat("a chat of the user's")
+    codex.finish(target, "done")
+    await until(() => orchestrator.readChat({ chatId: target }).chat.status === "completed")
+
+    // Both turns are running when the flags flip. Each was told what it was
+    // when it started, so it is held to that until it ends.
+    await store.setChatDelegator(root, false)
+    await store.setChatDelegator(other, true)
+    await orchestrator.sendMessage(root, { chatId: target, message: "look at this" })
+    expect(store.getChat(target)).toMatchObject({ parentChatId: root, adopted: true })
+    const independent = await orchestrator.createChat(other, { message: "separate work", subchat: false })
+    expect(independent.parentChatId).toBeUndefined()
+
+    codex.finish(root, "done")
+    codex.finish(other, "done")
+    await until(() => !agent.isBusy(root) && !agent.isBusy(other))
+    await agent.send({ type: "chat.send", chatId: root, provider: "codex", content: "again" })
+    await agent.send({ type: "chat.send", chatId: other, provider: "codex", content: "again" })
+    await until(() => codex.turnsFor(root).length === 2 && codex.turnsFor(other).length === 2)
+    expect(codex.turn(root).delegator).toBe(false)
+    expect(codex.turn(other).delegator).toBe(true)
+    const child = await orchestrator.createChat(other, { message: "audit the parser", subchat: false })
+    expect(child.parentChatId).toBe(other)
+    const plain = await orchestrator.createChat(root, { message: "more separate work", subchat: false })
+    expect(plain.parentChatId).toBeUndefined()
+  })
+
   test("every chat a delegator creates is its sub-chat, whatever it passes", async () => {
     const context = await setup()
     const { orchestrator, store, codex, userChat } = context
@@ -1893,14 +1925,21 @@ describe("delegators", () => {
 
   test("a delegator cannot message a chat above it, and one delegator can take another", async () => {
     const context = await setup()
-    const { orchestrator, store, userChat } = context
+    const { orchestrator, store, userChat, codex, agent } = context
     const top = await userChat()
     const nested = await orchestrator.createChat(top, { message: "coordinate" })
+    // Made one between turns: a turn already running keeps what it was told.
+    codex.finish(nested.chatId, "done")
+    await until(() => !agent.isBusy(nested.chatId))
     await store.setChatDelegator(nested.chatId, true)
+    await agent.send({ type: "chat.send", chatId: nested.chatId, provider: "codex", content: "coordinate" })
+    await until(() => codex.turnsFor(nested.chatId).length === 2)
+    // Its first turn's report.
+    const queued = store.getQueuedMessages(top).length
     // Adopting its parent would close the chain into a loop, and it has no other way to send.
     await expect(orchestrator.sendMessage(nested.chatId, { chatId: top, message: "question" })).rejects.toThrow("This chat is a delegator")
     expect(store.getChat(top)).not.toHaveProperty("parentChatId")
-    expect(store.getQueuedMessages(top)).toHaveLength(0)
+    expect(store.getQueuedMessages(top)).toHaveLength(queued)
 
     const first = await delegatorChat(context, "run the launch")
     const second = await delegatorChat(context, "run support")

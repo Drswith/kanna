@@ -285,6 +285,38 @@ describe("CodexAppServerManager", () => {
     expect(turnStart?.params.collaborationMode?.settings?.reasoning_effort).toBe("xhigh")
   })
 
+  test("each turn on the thread carries the delegator instructions only while the chat is one", async () => {
+    let turns = 0
+    const process = new FakeCodexProcess((message, child) => {
+      if (message.method === "initialize") {
+        child.writeServerMessage({ id: message.id, result: { userAgent: "codex-test" } })
+      } else if (message.method === "thread/start") {
+        child.writeServerMessage({ id: message.id, result: { thread: { id: "thread-1" }, model: "gpt-5.4" } })
+      } else if (message.method === "turn/start") {
+        const turn = { id: `turn-${++turns}`, status: "completed", error: null }
+        child.writeServerMessage({ id: message.id, result: { turn } })
+        child.writeServerMessage({ method: "turn/completed", params: { threadId: "thread-1", turn } })
+      }
+    })
+    const manager = new CodexAppServerManager({ spawnProcess: () => process as never })
+
+    for (const delegator of [false, true, false]) {
+      await manager.startSession({ chatId: "chat-1", cwd: "/tmp/project", model: "gpt-5.4", sessionToken: turns ? "thread-1" : null })
+      const turn = await manager.startTurn({ chatId: "chat-1", model: "gpt-5.4", content: "go", planMode: false, delegator, onToolRequest: async () => ({}) })
+      await collectStream(turn.stream)
+    }
+
+    // One thread throughout: the flag needs no new session, since Codex takes
+    // its instructions on every turn.
+    expect(process.messages.filter((message: any) => message.method === "thread/start")).toHaveLength(1)
+    expect(process.messages.filter((message: any) => message.method === "thread/resume")).toHaveLength(0)
+    const turnStarts = process.messages.filter((message: any) => message.method === "turn/start") as any[]
+    expect(turnStarts.map((message) => message.params.threadId)).toEqual(["thread-1", "thread-1", "thread-1"])
+    expect(turnStarts.map((message) => message.params.collaborationMode.settings.developer_instructions.includes("# This chat is a delegator")))
+      .toEqual([false, true, false])
+    expect(turnStarts.every((message) => message.params.collaborationMode.settings.developer_instructions.includes("# Kanna chats"))).toBe(true)
+  })
+
   test("sends an explicit null service tier when fast mode is off", async () => {
     const process = new FakeCodexProcess((message, child) => {
       if (message.method === "initialize") {

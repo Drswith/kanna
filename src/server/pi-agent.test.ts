@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { normalizeToolCall } from "../shared/tools"
 import {
   buildRegistryModel,
+  PiAgentManager,
   extractPiToolResultContent,
   normalizePiUsage,
   translatePiTool,
@@ -181,5 +185,73 @@ describe("buildRegistryModel", () => {
       id: "local-coder",
     })
     expect(model.compat?.thinkingFormat).toBe("openai")
+  })
+})
+
+describe("PiAgentManager and a delegator flip", () => {
+  test("the next turn reopens the session file under the new system prompt, history intact", async () => {
+    // The real pi SDK against a stand-in for the OpenAI-compatible endpoint,
+    // which records what each request carried. Pi sends its system prompt as
+    // the developer message.
+    const requests: Array<{ messages: Array<{ role: string; content: unknown }> }> = []
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        requests.push(await request.json())
+        const chunk = (body: object) => `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 0, model: "fake", ...body })}\n\n`
+        return new Response(
+          chunk({ choices: [{ index: 0, delta: { role: "assistant", content: `reply ${requests.length}` }, finish_reason: null }] })
+            + chunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })
+            + "data: [DONE]\n\n",
+          { headers: { "content-type": "text/event-stream" } },
+        )
+      },
+    })
+    const root = mkdtempSync(path.join(tmpdir(), "kanna-pi-delegator-"))
+    const manager = new PiAgentManager({ dataDir: path.join(root, "pi") })
+    const connection: PiConnection = { provider: "custom", baseUrl: `http://localhost:${server.port}/v1`, apiKey: "k" }
+    const text = (content: unknown) => typeof content === "string"
+      ? content
+      : (content as Array<{ text?: string }>).map((part) => part.text ?? "").join("")
+    try {
+      let sessionToken: string | null = null
+      for (const [index, delegator] of [false, true, false].entries()) {
+        const turn = await manager.startTurn({
+          chatId: "chat-1",
+          cwd: root,
+          content: `message ${index + 1}`,
+          model: "fake-model",
+          effort: "off",
+          sessionToken,
+          forkSession: false,
+          connection,
+          delegator,
+        })
+        for await (const event of turn.stream) {
+          if (event.type === "session_token") sessionToken = event.sessionToken ?? null
+          if (event.entry?.kind === "result") expect(event.entry.isError).toBe(false)
+        }
+      }
+
+      expect(requests).toHaveLength(3)
+      const system = requests.map((request) => text(request.messages.find((message) => message.role === "developer")?.content))
+      expect(system.map((prompt) => prompt.includes("# This chat is a delegator"))).toEqual([false, true, false])
+      expect(system.every((prompt) => prompt.includes("# Kanna chats"))).toBe(true)
+      // Each reopened session has the whole conversation so far.
+      const said = (request: (typeof requests)[number]) => request.messages
+        .filter((message) => message.role !== "developer")
+        .map((message) => `${message.role}: ${text(message.content)}`)
+      expect(said(requests[2]!)).toEqual([
+        "user: message 1",
+        "assistant: reply 1",
+        "user: message 2",
+        "assistant: reply 2",
+        "user: message 3",
+      ])
+    } finally {
+      manager.dispose()
+      server.stop(true)
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

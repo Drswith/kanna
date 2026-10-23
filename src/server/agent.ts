@@ -142,6 +142,27 @@ export function claudeToolset(autoPlan: boolean): string[] {
   return autoPlan ? [...CLAUDE_BASE_TOOLSET, "EnterPlanMode"] : [...CLAUDE_BASE_TOOLSET]
 }
 
+/**
+ * Append-only: the claude_code preset stays intact, Kanna's session
+ * instructions ride on the end of it (see harness-instructions.ts).
+ *
+ * `snapshot: false` because by default the CLI records a session's system
+ * prompt on its first request and sends that record on every resume, whatever
+ * a later launch appends, until compaction. Kanna restarts a session to change
+ * what it is told (a delegator flip, the model in the attribution), and under
+ * the record the resumed session went on hearing the old text. Rendered fresh,
+ * a resume after a change misses the prompt cache once, which the change
+ * costs anyway.
+ */
+export function claudeSystemPrompt(model: string, delegator: boolean | undefined) {
+  return {
+    type: "preset" as const,
+    preset: "claude_code" as const,
+    append: buildKannaSystemInstructions(buildKannaAgentId("claude", model), { delegator }),
+    snapshot: false,
+  }
+}
+
 interface PendingToolRequest {
   toolUseId: string
   tool: NormalizedToolCall & { toolKind: "ask_user_question" | "exit_plan_mode" }
@@ -189,6 +210,8 @@ interface ActiveTurn {
   serviceTier?: "fast"
   planMode: boolean
   autoPlan: boolean
+  /** Its agent was told the chat is a delegator. See `turnDelegator`. */
+  delegator: boolean
   status: KannaStatus
   pendingTool: PendingToolRequest | null
   postToolFollowUp: { content: string; planMode: boolean } | null
@@ -999,13 +1022,7 @@ async function startClaudeSession(args: {
       // like the rest.
       forwardSubagentText: true,
       settingSources: ["user", "project", "local"],
-      // Append-only: the claude_code preset stays intact, Kanna's session
-      // instructions ride on the end of it (see harness-instructions.ts).
-      systemPrompt: {
-        type: "preset",
-        preset: "claude_code",
-        append: buildKannaSystemInstructions(buildKannaAgentId("claude", args.model), { delegator: args.delegator }),
-      },
+      systemPrompt: claudeSystemPrompt(args.model, args.delegator),
       // fastMode must go through the flag-settings layer: the CLI only allows
       // fast mode in Agent SDK sessions when flagSettings.fastMode is true,
       // and an explicit false keeps a user-level settings.json from silently
@@ -1342,6 +1359,15 @@ export class AgentCoordinator {
   /** A turn is running or about to. See `startingTurns`. */
   isBusy(chatId: string) {
     return this.activeTurns.has(chatId) || this.startingTurns.has(chatId)
+  }
+
+  /**
+   * Whether the chat's running turn was told it is a delegator, or undefined
+   * with no turn running. A flip reaches the agent on its next turn, so a turn
+   * running across one is held to what it was told, not to the new flag.
+   */
+  turnDelegator(chatId: string): boolean | undefined {
+    return this.activeTurns.get(chatId)?.delegator
   }
 
   /** A turn gave its result and its stream is still open. */
@@ -2253,6 +2279,7 @@ export class AgentCoordinator {
       serviceTier: args.serviceTier,
       planMode: args.planMode,
       autoPlan: args.autoPlan,
+      delegator,
       status: args.provider === "claude" ? "running" : "starting",
       pendingTool: null,
       postToolFollowUp: null,
@@ -2343,7 +2370,8 @@ export class AgentCoordinator {
     // restarting the session. The restart resumes by sessionToken, so the
     // conversation carries over. The delegator instructions are part of the
     // system prompt, fixed at the same time, so a chat that became a
-    // delegator or stopped being one restarts the same way.
+    // delegator or stopped being one restarts the same way, and the resumed
+    // session hears the new prompt (see claudeSystemPrompt).
     if (
       !session
       || session.localPath !== args.localPath
@@ -2817,6 +2845,7 @@ export class AgentCoordinator {
       effort: session.effort,
       planMode: session.planMode,
       autoPlan: session.autoPlan,
+      delegator: session.delegator,
       status: "running",
       pendingTool: null,
       postToolFollowUp: null,
@@ -2868,6 +2897,7 @@ export class AgentCoordinator {
         if (
           !this.activeTurns.has(session.chatId)
           && !session.suppressResume
+          && this.claudeSessions.get(session.chatId) === session
           && (
             event.entry.kind === "assistant_text"
             || event.entry.kind === "tool_call"
@@ -2881,7 +2911,13 @@ export class AgentCoordinator {
           session.suppressResume = false
         }
 
-        const active = this.activeTurns.get(session.chatId)
+        // Only this session's turn. A steer that restarts the session (after
+        // a delegator flip, an effort change) starts the replacement before
+        // this stream delivers the result of the prompt the steer cancelled,
+        // and the replacement numbers its prompts from 1 too, so that result
+        // would end the new turn as failed.
+        const current = this.activeTurns.get(session.chatId)
+        const active = current?.claudeSessionId === session.id ? current : undefined
         if (event.entry.kind === "system_init" && active) {
           active.status = "running"
           const chat = this.store.getChat(session.chatId)
@@ -2938,7 +2974,7 @@ export class AgentCoordinator {
       }
     } catch (error) {
       const active = this.activeTurns.get(session.chatId)
-      if (active && !active.cancelRequested) {
+      if (active?.claudeSessionId === session.id && !active.cancelRequested) {
         const message = error instanceof Error ? error.message : String(error)
         await this.store.appendMessage(
           session.chatId,

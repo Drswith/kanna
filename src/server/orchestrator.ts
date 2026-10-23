@@ -84,6 +84,8 @@ const CLOSE_OUT_GRACE_MS = 60_000
 /** The coordinator, as far as the orchestrator needs it. Narrow so tests can stand in for it. */
 export interface OrchestratorAgent {
   isBusy(chatId: string): boolean
+  /** Whether its running turn was told it is a delegator. Undefined with none running. */
+  turnDelegator?(chatId: string): boolean | undefined
   isDraining(chatId: string): boolean
   /** Work handed to another agent of the provider's is still going. What a chat waits on. */
   hasDelegatedWork(chatId: string): boolean
@@ -914,7 +916,7 @@ export class ChatOrchestrator {
   }) {
     const caller = this.requireChat(actorChatId)
     // A delegator's chats are always under it. See the note at the top.
-    const subchat = caller.delegator ? true : input.subchat ?? true
+    const subchat = this.isDelegating(caller) ? true : input.subchat ?? true
     const projectId = input.projectId ?? caller.projectId
     if (!this.store.getProject(projectId)) {
       throw new Error(`Project ${projectId} not found. get_context lists the projects.`)
@@ -949,7 +951,7 @@ export class ChatOrchestrator {
     const caller = this.requireChat(actorChatId)
     // A fork handed work is delegation, so it reports back unless told not to.
     // A delegator's fork is under it either way.
-    const subchat = caller.delegator ? true : input.subchat ?? Boolean(input.message)
+    const subchat = this.isDelegating(caller) ? true : input.subchat ?? Boolean(input.message)
     this.checkBudget(actorChatId)
     const forked = await this.commands.fork(source.id, {
       createdByChatId: actorChatId,
@@ -995,7 +997,7 @@ export class ChatOrchestrator {
     })
     // Before the send: the turn it starts is told who its parent is, and the
     // report it earns is addressed by the link.
-    const delegating = Boolean(this.requireChat(actorChatId).delegator)
+    const delegating = this.isDelegating(this.requireChat(actorChatId))
     const adoption = input.adopt || delegating ? await this.adopt(actorChatId, target, { forced: delegating && !input.adopt }) : null
     // Named for the work it is given, before the message lands, so the
     // sidebar says what it is doing from the start. Only a chat of this
@@ -1042,6 +1044,16 @@ export class ChatOrchestrator {
       titleChanged: previousTitle !== null,
       ...(!ownChat && title !== target.title ? { note: "Not renamed: it is not a sub-chat of this chat. Pass adopt: true to hand it work as yours, and title it." } : {}),
     }
+  }
+
+  /**
+   * Whether the parent rule applies to what this chat does. Its running turn
+   * decides: the agent hears of a flip on its next turn, and enforcing the
+   * new flag sooner would hold it to what it was never told, or drop the
+   * adoption its instructions promised it.
+   */
+  private isDelegating(chat: ChatRecord) {
+    return this.agent.turnDelegator?.(chat.id) ?? Boolean(chat.delegator)
   }
 
   /**
