@@ -31,6 +31,7 @@ import { isMacApp } from "../lib/macApp"
 import type { ChatPreview, ChatTouchedFilesResult, KeybindingsSnapshot, SidebarChatRow, UpdateSnapshot } from "../../shared/types"
 import { isNightlyVersion } from "../../shared/types"
 import type { SocketStatus } from "./socket"
+import type { ConnectionHealth } from "./connectionHealth"
 import {
   getSidebarJumpTargetIndex,
   getSidebarNumberJumpHint,
@@ -80,6 +81,7 @@ function persistSidebarWidth(width: number) {
 interface KannaSidebarProps {
   activeChatId: string | null
   connectionStatus: SocketStatus
+  connectionHealth: ConnectionHealth
   ready: boolean
   collapsed: boolean
   /** Mobile only: a floating back-to-`/` button for pages with no header. */
@@ -327,6 +329,7 @@ function useFocusMotion(focused: boolean) {
 function KannaSidebarImpl({
   activeChatId,
   connectionStatus,
+  connectionHealth,
   ready,
   collapsed,
   showMobileBackButton,
@@ -884,8 +887,14 @@ function KannaSidebarImpl({
   const isSettingsActive = location.pathname.startsWith("/settings")
   const isUtilityPageActive = isLocalProjectsActive || isSettingsActive
   const isConnecting = connectionStatus === "connecting" || !ready
-  const statusLabel = isConnecting ? "Connecting" : connectionStatus === "connected" ? "Connected" : "Disconnected"
-  const statusDotClass = connectionStatus === "connected" ? "bg-emerald-500" : "bg-amber-500"
+  // A drop reads as "Reconnecting" with a spinner until it has really failed
+  // (`connectionHealth.ts`); only then "Disconnected".
+  const isConnectionLost = connectionHealth === "lost"
+  const isStatusSettled = isConnectionLost || (connectionHealth === "connected" && ready)
+  const statusLabel = isConnectionLost
+    ? "Disconnected"
+    : isStatusSettled ? "Connected" : connectionHealth === "reconnecting" ? "Reconnecting" : "Connecting"
+  const statusDotClass = isConnectionLost ? "bg-amber-500" : "bg-emerald-500"
   const showNightlyUpdate = isNightlyVersion(updateSnapshot?.currentVersion ?? "")
     && updateSnapshot?.nightly?.status === "available"
   const showUpdateButton = showNightlyUpdate || updateSnapshot?.updateAvailable === true
@@ -1381,7 +1390,7 @@ function KannaSidebarImpl({
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>{statusLabel}</span>
-                {isConnecting ? (
+                {!isStatusSettled ? (
                   <Loader2 className="h-2 w-2 animate-spin" />
                 ) : (
                   <span className={cn("h-2 w-2 rounded-full", statusDotClass)} />
