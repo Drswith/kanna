@@ -69,6 +69,19 @@ describe("chat commands", () => {
     expect(tracked).toEqual(["chat_created"])
   })
 
+  test("a Grok chat cannot be made a delegator, and a delegator that went to Grok can stop", async () => {
+    const { commands, project, store } = await setup()
+    const grok = (await commands.create(project.id)).result.chatId
+    await store.setChatProvider(grok, "grok")
+    await expect(commands.setDelegator(grok, true)).rejects.toThrow("A Grok chat cannot be a delegator")
+    expect(store.getChat(grok)).not.toHaveProperty("delegator")
+
+    const switched = (await commands.create(project.id, undefined, { delegator: true })).result.chatId
+    await store.setChatProvider(switched, "grok")
+    await commands.setDelegator(switched, false)
+    expect(store.getChat(switched)).not.toHaveProperty("delegator")
+  })
+
   test("archiving an empty chat deletes it, and its own topic is pushed so open tabs see it go", async () => {
     const { commands, project, store } = await setup()
     const empty = (await commands.create(project.id)).result.chatId

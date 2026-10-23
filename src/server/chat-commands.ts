@@ -97,6 +97,11 @@ export function createChatCommands({ store, agent, analytics }: ChatCommandsDeps
      * instructions it started with.
      */
     async setDelegator(chatId: string, delegator: boolean): Promise<ChatCommandOutcome> {
+      // Grok is not given the chat tools, so it has nothing to hand work off
+      // with. The clients do not offer it; this holds it for any client.
+      if (delegator && store.getChat(chatId)?.provider === "grok") {
+        throw new Error("A Grok chat cannot be a delegator: Grok has no chat tools to hand work to other chats.")
+      }
       await store.setChatDelegator(chatId, delegator)
       return { result: undefined, changed: chatAndSidebar(chatId) }
     },
