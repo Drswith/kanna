@@ -2442,6 +2442,11 @@ export interface HydratedToolCallBase<TKind extends string, TInput, TResult> {
   resultTrimmed?: boolean
   timestamp: string
   /**
+   * When the `tool_result` entry was written, as `timestamp` is for the call.
+   * Set with `resultEntryId`; the two stamps are how long the call took.
+   */
+  resultTimestamp?: string
+  /**
    * What a subagent did, in order: the entries stamped with this call's
    * `toolId` as `parentToolUseId`, hydrated the same way as the main thread.
    * Only ever set on a `subagent_task` call. Absent when the agent has not
