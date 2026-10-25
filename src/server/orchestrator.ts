@@ -45,7 +45,16 @@ import {
  * on and hear back. Its agent is asked to keep every chat it uses under it,
  * and that is not left to the asking: whatever it passes, a chat it creates
  * or forks is its sub-chat, and a chat it messages is adopted.
+ *
+ * Whether the sidebar lists a chat is its own field (`ChatRecord.hidden`),
+ * not the parent link. A chat started under another is hidden and an adopted
+ * one is listed, unless the agent passes `showInSidebar`. A delegator's
+ * listed chat is still its sub-chat: the user asked to see the work, not to
+ * take it from the chat that runs it.
  */
+
+/** A chat with no parent is in no task log, so a list is the only place it is shown. */
+const UNLISTED_ORPHAN_ERROR = "A chat that is not a sub-chat of this one has to be in the sidebar: nothing else would show it. Leave showInSidebar unset, or keep the chat a sub-chat."
 
 /** Agent-created chats nest at most this deep below a chat the user started. */
 export const MAX_CHAT_DEPTH = 3
@@ -158,6 +167,8 @@ export interface AgentChatSummary {
   parentChatId?: string
   /** The parent adopted it and did not start it. See `ChatRecord.adopted`. */
   adopted?: true
+  /** Not in the user's sidebar: shown with its parent. See `ChatRecord.hidden`. */
+  hidden?: true
   /** It hands work to the chats under it instead of doing it. See `ChatRecord.delegator`. */
   delegator?: true
   forkedFromChatId?: string
@@ -528,6 +539,7 @@ export class ChatOrchestrator {
       planMode: chat.planMode,
       ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}),
       ...(chat.adopted ? { adopted: true as const } : {}),
+      ...(chat.hidden ? { hidden: true as const } : {}),
       ...(chat.delegator ? { delegator: true as const } : {}),
       ...(chat.forkedFromChatId ? { forkedFromChatId: chat.forkedFromChatId } : {}),
       ...(chat.createdByChatId ? { createdByChatId: chat.createdByChatId } : {}),
@@ -913,10 +925,14 @@ export class ChatOrchestrator {
     title?: string
     projectId?: string
     subchat?: boolean
+    /** Overrides where it is shown. By default a sub-chat is hidden and any other chat listed. */
+    showInSidebar?: boolean
   }) {
     const caller = this.requireChat(actorChatId)
     // A delegator's chats are always under it. See the note at the top.
     const subchat = this.isDelegating(caller) ? true : input.subchat ?? true
+    const hidden = input.showInSidebar === undefined ? subchat : !input.showInSidebar
+    if (hidden && !subchat) throw new Error(UNLISTED_ORPHAN_ERROR)
     const projectId = input.projectId ?? caller.projectId
     if (!this.store.getProject(projectId)) {
       throw new Error(`Project ${projectId} not found. get_context lists the projects.`)
@@ -932,7 +948,7 @@ export class ChatOrchestrator {
     const created = await this.commands.create(projectId, {
       createdByChatId: actorChatId,
       ...(subchat ? { parentChatId: actorChatId } : {}),
-    })
+    }, { hidden })
     const chat = this.requireChat(created.result.chatId)
     if (input.title?.trim()) await this.commands.rename(chat.id, input.title)
     await this.send(actorChatId, chat, input.message, run, { report: subchat })
@@ -946,17 +962,21 @@ export class ChatOrchestrator {
     /** The new work's. A fork is how a chat's context is reused for new work, so the tool requires one. */
     title?: string
     subchat?: boolean
+    /** As for `createChat`. */
+    showInSidebar?: boolean
   }) {
     const source = this.requireChat(input.chatId ?? actorChatId)
     const caller = this.requireChat(actorChatId)
     // A fork handed work is delegation, so it reports back unless told not to.
     // A delegator's fork is under it either way.
     const subchat = this.isDelegating(caller) ? true : input.subchat ?? Boolean(input.message)
+    const hidden = input.showInSidebar === undefined ? subchat : !input.showInSidebar
+    if (hidden && !subchat) throw new Error(UNLISTED_ORPHAN_ERROR)
     this.checkBudget(actorChatId)
     const forked = await this.commands.fork(source.id, {
       createdByChatId: actorChatId,
       ...(subchat ? { parentChatId: actorChatId } : {}),
-    })
+    }, { hidden })
     const chat = this.requireChat(forked.result.chatId)
     if (input.title?.trim()) await this.commands.rename(chat.id, input.title.trim())
     if (input.message) {
@@ -984,6 +1004,12 @@ export class ChatOrchestrator {
     title?: string
     delivery?: "queue" | "steer"
     adopt?: boolean
+    /**
+     * Lists the chat in the sidebar, or takes it out. Only for a sub-chat of
+     * this one: one it started, or adopts with this message. Applied once the
+     * message is sent.
+     */
+    showInSidebar?: boolean
   }) {
     if (input.chatId === actorChatId) {
       throw new Error("A chat cannot message itself. Use set_schedule to send this chat a message later.")
@@ -998,6 +1024,10 @@ export class ChatOrchestrator {
     // Before the send: the turn it starts is told who its parent is, and the
     // report it earns is addressed by the link.
     const delegating = this.isDelegating(this.requireChat(actorChatId))
+    // Checked before anything is done, so a refusal leaves nothing behind.
+    if (input.showInSidebar !== undefined && target.parentChatId !== actorChatId && !input.adopt && !delegating) {
+      throw new Error("showInSidebar is only for a sub-chat of this chat. Pass adopt: true to make it one with this message.")
+    }
     const adoption = input.adopt || delegating ? await this.adopt(actorChatId, target, { forced: delegating && !input.adopt }) : null
     // Named for the work it is given, before the message lands, so the
     // sidebar says what it is doing from the start. Only a chat of this
@@ -1024,6 +1054,7 @@ export class ChatOrchestrator {
       await adoption?.undo().catch(() => {})
       throw error
     }
+    if (input.showInSidebar !== undefined) await this.store.setChatHidden(target.id, !input.showInSidebar)
     if (!adoption) {
       this.push({ sidebar: true, chatIds: [target.id] })
     } else {
@@ -1081,8 +1112,13 @@ export class ChatOrchestrator {
       parent: target.parentChatId ? { parentChatId: target.parentChatId, adopted: Boolean(target.adopted) } : null,
       reportOwed: Boolean(target.reportOwed),
       reportedThrough: target.reportedThrough,
+      hidden: Boolean(target.hidden),
     }
     await this.store.setChatParent(target.id, { parentChatId: actorChatId, adopted: true })
+    // An adopted chat is listed, as it was when visibility followed the parent
+    // link: one hidden under the parent that started it comes out from there.
+    // `showInSidebar` on the same message can still hide it.
+    await this.store.setChatHidden(target.id, false)
     // What it owed, and what it had already told, were the former parent's.
     // The new one starts with nothing heard, and a turn in flight was not its.
     await this.store.setReportOwed(target.id, false)
@@ -1093,6 +1129,7 @@ export class ChatOrchestrator {
       owedFormerParent: former.parent !== null && former.reportOwed,
       undo: async () => {
         await this.store.setChatParent(target.id, former.parent)
+        await this.store.setChatHidden(target.id, former.hidden)
         if (!former.reportOwed) await this.store.setReportOwed(target.id, false)
         else if (former.reportedThrough === undefined) await this.store.setReportOwed(target.id, true)
         else await this.store.setReportedThrough(target.id, former.reportedThrough)

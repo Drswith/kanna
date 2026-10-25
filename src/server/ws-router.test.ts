@@ -38,6 +38,7 @@ function withSidebarGroupDefaults(group: {
     lastMessageAt?: number
     canFork?: boolean
     hasAutomation: boolean
+    hidden?: boolean
   }>
 }) {
   return {
@@ -1668,6 +1669,7 @@ describe("ws-router", () => {
               localPath: "/tmp/project",
               provider: null,
               hasAutomation: false,
+              hidden: false,
             }],
           })],
         },
@@ -1694,6 +1696,7 @@ describe("ws-router", () => {
               localPath: "/tmp/project",
               provider: null,
               hasAutomation: false,
+              hidden: false,
             }],
           })],
         },
@@ -1964,6 +1967,7 @@ describe("ws-router", () => {
               provider: "claude",
               canFork: true,
               hasAutomation: false,
+              hidden: false,
             }, {
               _id: "chat-1",
               _creationTime: 1,
@@ -1975,6 +1979,7 @@ describe("ws-router", () => {
               provider: "claude",
               canFork: true,
               hasAutomation: false,
+              hidden: false,
             }],
           })],
         },

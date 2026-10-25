@@ -2766,7 +2766,7 @@ export class AgentCoordinator {
     return true
   }
 
-  async forkChat(chatId: string, lineage?: { parentChatId?: string; createdByChatId?: string }) {
+  async forkChat(chatId: string, lineage?: { parentChatId?: string; createdByChatId?: string }, options?: { hidden?: boolean }) {
     const chat = this.store.requireChat(chatId)
     if (!chat.provider) {
       throw new Error("Chat must have a provider before forking")
@@ -2780,7 +2780,7 @@ export class AgentCoordinator {
     // tool calls whose results have not arrived. Nothing here touches the
     // source's turn — it keeps running.
     const running = this.activeTurns.has(chatId) || this.drainingStreams.has(chatId)
-    const forked = await this.store.forkChat(chatId, { atLastCompletedTurn: running, ...lineage })
+    const forked = await this.store.forkChat(chatId, { atLastCompletedTurn: running, ...lineage, ...options })
     this.analytics.track("chat_created")
     return { chatId: forked.id }
   }

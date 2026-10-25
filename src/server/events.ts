@@ -161,6 +161,19 @@ export interface ChatRecord {
    */
   adopted?: true
   /**
+   * Left out of every list of chats (the sidebar, the palette, a project's
+   * page) and of what the user is told is unread. Such a chat is shown with
+   * its parent instead: the parent's task log and the card where it was
+   * started. Never false; absent on a listed chat.
+   *
+   * Stored, not derived from the parent link, so an agent can list a chat it
+   * still owns (`showInSidebar` on the chat tools). It is set when the chat is
+   * created and when its parent changes, with defaults that keep the rule it
+   * replaced: a chat an agent started under it is hidden, an adopted one is
+   * not. `migrateSidebarVisibility` wrote it once for chats made before it.
+   */
+  hidden?: true
+  /**
    * Set on a chat that coordinates work and hands it to other chats instead
    * of doing it. Its agent is told so in its session instructions
    * (`KANNA_DELEGATOR_INSTRUCTIONS`), and every chat it starts or messages
@@ -299,6 +312,16 @@ export type ChatEvent =
       forkedEntryCount?: number
       createdByChatId?: string
       delegator?: boolean
+      /** See `ChatRecord.hidden`. Absent on a listed chat, and on logs from before the field. */
+      hidden?: boolean
+    }
+  | {
+      v: 2
+      /** Lists a chat, or leaves it out of the lists. See `ChatRecord.hidden`. */
+      type: "chat_hidden_set"
+      timestamp: number
+      chatId: string
+      hidden: boolean
     }
   | {
       v: 2

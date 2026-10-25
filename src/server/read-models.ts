@@ -18,7 +18,6 @@ import type { ProjectRepoLabel } from "./worktree-probe"
 import type { ChatRecord, StoreState, TouchedFile } from "./events"
 import { resolveLocalPath } from "./paths"
 import { SERVER_PROVIDERS } from "./provider-catalog"
-import { isSubChat } from "../shared/sub-chat"
 import { buildTranscriptOutline } from "../shared/transcript-window"
 import type { TranscriptOutlineEntry } from "../shared/types"
 
@@ -307,6 +306,9 @@ export function deriveSidebarData(
           canFork: canForkChat(chat, activeStatuses, drainingChatIds) || undefined,
           ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}),
           ...(chat.parentChatId && chat.adopted ? { adopted: true as const } : {}),
+          // Stated on every row, false included, so a client can tell a
+          // server that sends it from one that predates it.
+          hidden: Boolean(chat.hidden),
           ...(chat.delegator ? { delegator: true as const } : {}),
         }
       })
@@ -317,8 +319,8 @@ export function deriveSidebarData(
     const iconUrl = options?.projectIcons?.get(project.localPath)
     const chats = toSidebarChatRows(project, chatsByProjectId.get(project.id) ?? [])
     const archivedChats = toSidebarChatRows(project, archivedChatsByProjectId.get(project.id) ?? [])
-    // The lists a project shows leave sub-chats out; `chats` keeps them for lookups.
-    const listedChats = chats.filter((chat) => !isSubChat(chat))
+    // The lists a project shows leave hidden chats out; `chats` keeps them for lookups.
+    const listedChats = chats.filter((chat) => !chat.hidden)
     const { previewChats, olderChats } = getSidebarChatBuckets(listedChats, nowMs)
 
     return {
@@ -478,6 +480,7 @@ export function deriveChatSnapshot(
     sessionToken: chat.sessionToken,
     ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}),
     ...(chat.parentChatId && chat.adopted ? { adopted: true as const } : {}),
+    ...(chat.hidden ? { hidden: true as const } : {}),
     ...(chat.delegator ? { delegator: true as const } : {}),
     ...(subagents?.length ? { subagents: [...subagents] } : {}),
     ...(schedules.length ? { schedules } : {}),

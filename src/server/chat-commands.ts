@@ -70,7 +70,7 @@ export function createChatCommands({ store, agent, analytics }: ChatCommandsDeps
     async create(
       projectId: string,
       lineage?: ChatLineage,
-      options?: { delegator?: boolean; chatId?: string },
+      options?: { delegator?: boolean; chatId?: string; hidden?: boolean },
     ): Promise<ChatCommandOutcome<{ chatId: string }>> {
       const chat = await store.createChat(projectId, lineage, options)
       // The count is of chats people start.
@@ -82,8 +82,8 @@ export function createChatCommands({ store, agent, analytics }: ChatCommandsDeps
       }
     },
 
-    async fork(chatId: string, lineage?: ChatLineage): Promise<ChatCommandOutcome<{ chatId: string }>> {
-      const result = await agent.forkChat(chatId, lineage)
+    async fork(chatId: string, lineage?: ChatLineage, options?: { hidden?: boolean }): Promise<ChatCommandOutcome<{ chatId: string }>> {
+      const result = await agent.forkChat(chatId, lineage, options)
       return { result, changed: { sidebar: true, localProjects: true } }
     },
 

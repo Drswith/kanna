@@ -1167,17 +1167,27 @@ export interface SidebarChatRow {
   hasAutomation: boolean
   canFork?: boolean
   /**
-   * The chat whose agent started this one as a sub-chat. Lists of chats leave
-   * these out: a sub-chat is shown with its parent, the way a subagent is. It
-   * stays in `chats` so anything that looks a chat up by id still finds it.
+   * The chat whose agent started this one as a sub-chat, or adopted it. What
+   * it reports to and what stopping cascades along. Whether lists show the
+   * chat is `hidden`'s to say, not this link's.
    */
   parentChatId?: string
   /**
    * Set when `parentChatId` came from the parent adopting the chat, not
-   * starting it. An adopted chat stays in every list: `isSubChat` in
-   * `shared/sub-chat.ts` is the rule. Never false; absent on every other row.
+   * starting it. Never false; absent on every other row.
    */
   adopted?: true
+  /**
+   * Whether lists of chats leave this one out: the sidebar, the palette, a
+   * project's page, and what counts as unread for the user. A hidden chat is
+   * shown with its parent, the way a subagent is. It stays in `chats` so
+   * anything that looks a chat up by id still finds it. See `ChatRecord.hidden`.
+   *
+   * The server states it on every row. Optional for a server that predates
+   * it, which a client of its own version never meets: such a server meant
+   * `parentChatId != null && !adopted`, the rule the field replaced.
+   */
+  hidden?: boolean
   /**
    * Set on a delegator: a chat that hands work to the chats under it instead
    * of doing it. Never false; absent on every other row.
@@ -2641,6 +2651,8 @@ export interface ChatRuntime {
   parentChatId?: string
   /** Set when that parent adopted the chat. The same value as `SidebarChatRow.adopted`. */
   adopted?: true
+  /** Set when lists of chats leave it out. `SidebarChatRow.hidden` when true; absent otherwise. */
+  hidden?: true
   /** Set on a delegator. The same value as `SidebarChatRow.delegator`. */
   delegator?: true
   /** With `status: "waiting_on_subagent"`, and only then. The same value as `SidebarChatRow.waitingOn`. */

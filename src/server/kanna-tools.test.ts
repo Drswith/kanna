@@ -231,6 +231,18 @@ describe("shared Kanna display tools", () => {
     } finally { runtime.abort() }
   })
 
+  test("create, fork and send take showInSidebar, for when the user asks", () => {
+    for (const name of ["create_chat", "fork_chat", "send_message"]) {
+      const schema = kannaToolSpecs().find((tool) => tool.name === name)!.inputSchema as unknown as { required?: string[]; properties: Record<string, { type?: string; description?: string }> }
+      const field = schema.properties.showInSidebar!
+      expect(field.type).toBe("boolean")
+      expect(schema.required ?? []).not.toContain("showInSidebar")
+      // Hiding delegated work stays the default.
+      expect(field.description).toContain("only when the user asks")
+      expect(field.description!.length).toBeLessThanOrEqual(2_048)
+    }
+  })
+
   test("every tool description fits in what Claude Code shows of one (2,048 characters)", () => {
     const over = kannaToolSpecs().filter((spec) => spec.description.length > 2_048).map((spec) => spec.name)
     expect(over).toEqual([])

@@ -7,11 +7,11 @@ import { createEmptyState, type TouchedFile } from "./events"
 import type { WorkingTreeProbe } from "./diff-store"
 
 describe("read models", () => {
-  test("a sub-chat stays in the project's chats but is left out of the lists it shows", () => {
+  test("a hidden chat stays in the project's chats but is left out of the lists it shows", () => {
     const state = createEmptyState()
     const now = Date.now()
     state.projectsById.set("p", { id: "p", localPath: "/tmp/p", title: "P", createdAt: 1, updatedAt: 1 })
-    const chat = (id: string, parentChatId?: string) => ({
+    const chat = (id: string, fields: { parentChatId?: string; hidden?: true } = {}) => ({
       id,
       projectId: "p",
       title: id,
@@ -25,17 +25,20 @@ describe("read models", () => {
       hasMessages: true,
       lastMessageAt: now,
       lastTurnOutcome: null,
-      ...(parentChatId ? { parentChatId } : {}),
+      ...fields,
     })
     state.chatsById.set("parent", chat("parent"))
-    state.chatsById.set("child", chat("child", "parent"))
+    state.chatsById.set("child", chat("child", { parentChatId: "parent", hidden: true }))
+    // The field decides, not the link: a sub-chat an agent listed, and a hidden chat with no parent.
+    state.chatsById.set("listed-child", chat("listed-child", { parentChatId: "parent" }))
+    state.chatsById.set("hidden-own", chat("hidden-own", { hidden: true }))
 
     const group = deriveSidebarData(state, new Map(), { nowMs: now }).projectGroups[0]!
     // Still findable by id: opening it, its title, its status all read from here.
-    expect(group.chats.map((row) => [row.chatId, row.parentChatId])).toEqual(
-      expect.arrayContaining([["parent", undefined], ["child", "parent"]]),
+    expect(group.chats.map((row) => [row.chatId, row.parentChatId, row.hidden])).toEqual(
+      expect.arrayContaining([["parent", undefined, false], ["child", "parent", true], ["listed-child", "parent", false], ["hidden-own", undefined, true]]),
     )
-    expect([...group.previewChats, ...group.olderChats].map((row) => row.chatId)).toEqual(["parent"])
+    expect([...group.previewChats, ...group.olderChats].map((row) => row.chatId).sort()).toEqual(["listed-child", "parent"])
   })
 
   test("a chat waiting on a subagent reads so in the sidebar and its snapshot, unless its last turn failed", () => {
