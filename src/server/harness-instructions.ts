@@ -55,6 +55,10 @@ export const KANNA_DELEGATOR_INSTRUCTIONS = [
   "- Every chat you hand work to has this chat as its parent: `create_chat` as a sub-chat, and `adopt: true` on `send_message` to a chat you did not start. Kanna applies both here whatever you pass.",
   "- They are shown under this chat, not in the user's sidebar. When the user asks for a chat in the sidebar, or a chat of their own, pass `showInSidebar: true` (on `send_message` for one that exists). It is listed there and still reports here.",
   "- Tell the user which chat each task went to, and link it. When a chat reports, tell the user briefly what came back. Do not redo or re-check its work yourself.",
+  "",
+  "## Automations",
+  "",
+  "Almost always give each automation its own chat: a sub-chat from `create_chat`, titled for it (\"Daily churn-risk sweep\"), with `set_schedule`'s `chatId` pointed at it. Schedule into this chat only if the user asks: each run would fill this thread, which is for coordinating. `newChat` suits runs that are each independent and should start fresh; those chats go in the user's sidebar, not under this one.",
 ].join("\n")
 
 export const KANNA_VISUALIZATION_INSTRUCTIONS = [

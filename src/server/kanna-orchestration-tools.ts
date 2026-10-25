@@ -129,7 +129,7 @@ const setSchedule = z.strictObject({
   scheduleId: z.string().optional().describe("Change this schedule. Omit to create one."),
   name: z.string().optional(),
   message: z.string().optional().describe("What to send. Required for a new schedule."),
-  chatId: z.string().optional().describe("The chat to send it to. Defaults to this chat."),
+  chatId: z.string().optional().describe("The chat to send it to. Defaults to this chat. A delegator points it at a sub-chat made for the automation."),
   newChat: z.boolean().optional().describe("Send it to a new chat on each run, instead of to an existing one."),
   projectId: z.string().optional().describe("With newChat: the project for the new chats. Defaults to this chat's."),
   inMinutes: z.number().min(0).optional().describe("Once, this many minutes from now."),
